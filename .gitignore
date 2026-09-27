@@ -1,0 +1,26 @@
+# Build / runtime
+build/
+dist/
+out/
+tmp/
+temp/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Captures generated during local tests
+*.tmp
