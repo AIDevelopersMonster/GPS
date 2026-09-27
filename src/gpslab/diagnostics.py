@@ -82,6 +82,7 @@ class GPSDiagnostics:
         for key in (
             "utc_time",
             "utc_date",
+            "navigation_status",
             "latitude",
             "longitude",
             "altitude_m",
