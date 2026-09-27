@@ -21,7 +21,7 @@ u-blox NEO-6M / GY-GPS6MV2
 
 Path:
 
-modules/u-blox/NEO-6M/GY-GPS6MV2/
+`modules/u-blox/NEO-6M/GY-GPS6MV2/`
 
 ## Project principle
 
@@ -39,13 +39,49 @@ Diagnostics should distinguish:
 8. Configuration persistence
 9. Antenna/RF problems
 
-## Tools
+## GPS-CLI and GPS-GUI
 
-Planned:
+The first working diagnostic toolchain is implemented as the shared Python package `gpslab`.
 
-- `gps-cli` - automated command-line diagnostics
-- `gps-gui` - graphical diagnostics and configuration
-- shared diagnostic core used by both interfaces
+Install from the repository root:
+
+```powershell
+py -m pip install -e .
+```
+
+List serial ports:
+
+```powershell
+gps-cli ports
+```
+
+Auto-probe a receiver:
+
+```powershell
+gps-cli probe COM7
+```
+
+Monitor live navigation status:
+
+```powershell
+gps-cli monitor COM7 --baud 9600
+```
+
+Launch the graphical console:
+
+```powershell
+gps-gui
+```
+
+Both interfaces use the same NMEA/UBX parsers and diagnostic state model.
+
+Version 0.1 is intentionally conservative: it reads receiver output and can send the read-only u-blox `UBX-MON-VER` identity poll, but it does not change receiver configuration.
+
+See:
+
+- `tools/README.md`
+- `tools/gps-cli/README.md`
+- `tools/gps-gui/README.md`
 
 ## Video reports
 
@@ -53,6 +89,8 @@ Planned:
 
 ## Status
 
-Initial project architecture.
-
-LAB-01 will use the GY-GPS6MV2 board with u-blox NEO-6M as the first reference device.
+- Repository architecture: active
+- Shared diagnostic core: v0.1
+- GPS-CLI: v0.1
+- GPS-GUI: v0.1
+- First hardware laboratory: GY-GPS6MV2 / u-blox NEO-6M
