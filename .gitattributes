@@ -1,0 +1,17 @@
+# Repository text format
+* text=auto eol=lf
+
+# Windows command files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.bin binary
+*.elf binary
