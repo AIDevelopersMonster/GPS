@@ -21,6 +21,7 @@ class GPSState:
     fix: str = "NO FIX"
     fix_quality: int = 0
     fix_type: int = 1
+    navigation_status: Optional[str] = None
 
     satellites_used: Optional[int] = None
     satellites_visible: Optional[int] = None
