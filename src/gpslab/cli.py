@@ -14,6 +14,7 @@ from .serialio import (
     open_serial,
     probe_port,
 )
+from .timecheck import time_sync_status, utc_delta_seconds
 
 
 GROUPS = ("serial", "protocol", "receiver", "sat", "nav", "time", "status")
@@ -128,6 +129,12 @@ def print_state(
         _print_heading("time / rate")
         print(f"UTC time          : {_fmt(state.utc_time)}")
         print(f"UTC date          : {_fmt(state.utc_date)}")
+        print(f"RMC status        : {_fmt(state.navigation_status)}")
+        delta = utc_delta_seconds(state.utc_date, state.utc_time)
+        if delta is None:
+            print("Host UTC delta    : -")
+        else:
+            print(f"Host UTC delta    : {delta:+.1f} s")
         if state.gga_rate_hz is not None:
             print(f"GGA rate          : {state.gga_rate_hz:.2f} Hz")
         else:
@@ -226,6 +233,57 @@ def cmd_monitor(args) -> int:
         return 0
 
 
+def cmd_time_test(args) -> int:
+    diag = GPSDiagnostics(port=args.port, baud=args.baud)
+    deadline = time.monotonic() + args.timeout
+    consecutive = 0
+    last_second = None
+
+    print(
+        f"Waiting for GNSS UTC on {args.port} @ {args.baud}. "
+        f"Timeout {args.timeout:.0f}s, confirmation {args.confirm} samples."
+    )
+
+    with open_serial(args.port, args.baud) as ser:
+        while time.monotonic() < deadline:
+            waiting = getattr(ser, "in_waiting", 0)
+            chunk = ser.read(waiting or 256)
+            if chunk:
+                diag.feed(chunk)
+
+            state = diag.state
+            ok, delta = time_sync_status(
+                date_text=state.utc_date,
+                time_text=state.utc_time,
+                satellites_visible=state.satellites_visible,
+                tolerance_seconds=args.tolerance,
+            )
+
+            current = (state.utc_date, state.utc_time)
+            if ok and current != last_second:
+                consecutive += 1
+                last_second = current
+                print(
+                    f"UTC {state.utc_date or '-'} {state.utc_time or '-'} | "
+                    f"visible={_fmt(state.satellites_visible)} | "
+                    f"RMC={_fmt(state.navigation_status)} | "
+                    f"host_delta={delta:+.1f}s | "
+                    f"confirm={consecutive}/{args.confirm}"
+                )
+                if consecutive >= args.confirm:
+                    print()
+                    print("TIME TEST: PASS")
+                    print("GNSS UTC confirmed; time test stopped automatically.")
+                    return 0
+            elif not ok:
+                consecutive = 0
+
+    print()
+    print("TIME TEST: TIMEOUT")
+    print_state(diag.state, ["time", "sat"])
+    return 2
+
+
 def cmd_capture(args) -> int:
     path = Path(args.output)
     diag = GPSDiagnostics(port=args.port, baud=args.baud)
@@ -269,22 +327,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("probe", help="Auto-detect baud and GPS protocol.")
     p.add_argument("port", help="Serial port, for example COM7.")
-    p.add_argument(
-        "--baud",
-        type=int,
-        help="Test only this baud rate instead of auto-probing.",
-    )
-    p.add_argument(
-        "--seconds",
-        type=float,
-        default=1.5,
-        help="Passive sample time per baud rate.",
-    )
-    p.add_argument(
-        "--no-identify",
-        action="store_true",
-        help="Do not send the read-only UBX MON-VER identity poll.",
-    )
+    p.add_argument("--baud", type=int, help="Test only this baud rate instead of auto-probing.")
+    p.add_argument("--seconds", type=float, default=1.5, help="Passive sample time per baud rate.")
+    p.add_argument("--no-identify", action="store_true", help="Do not send the read-only UBX MON-VER identity poll.")
     p.add_argument("--json", action="store_true", help="JSON output.")
     add_group_argument(p)
     p.set_defaults(func=cmd_probe)
@@ -301,13 +346,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("port")
     p.add_argument("--baud", type=int, default=9600)
     p.add_argument("--interval", type=float, default=1.0)
-    p.add_argument(
-        "--raw",
-        action="store_true",
-        help="Print the raw serial stream.",
-    )
+    p.add_argument("--raw", action="store_true", help="Print the raw serial stream.")
     add_group_argument(p)
     p.set_defaults(func=cmd_monitor)
+
+    p = sub.add_parser(
+        "time-test",
+        help="Wait for confirmed GNSS UTC and stop automatically.",
+    )
+    p.add_argument("port")
+    p.add_argument("--baud", type=int, default=9600)
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument(
+        "--confirm",
+        type=int,
+        default=3,
+        help="Consecutive valid UTC samples required before PASS.",
+    )
+    p.add_argument(
+        "--tolerance",
+        type=float,
+        default=10.0,
+        help="Maximum allowed difference from host UTC in seconds.",
+    )
+    p.set_defaults(func=cmd_time_test)
 
     p = sub.add_parser("capture", help="Save raw serial data.")
     p.add_argument("port")
