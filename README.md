@@ -47,6 +47,10 @@ Planned:
 - `gps-gui` - graphical diagnostics and configuration
 - shared diagnostic core used by both interfaces
 
+## Video reports
+
+- Git + GitHub from scratch using the GPS project: https://youtu.be/1EewXEMynV0
+
 ## Status
 
 Initial project architecture.
