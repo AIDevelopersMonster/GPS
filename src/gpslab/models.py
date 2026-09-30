@@ -17,6 +17,7 @@ class GPSState:
     protocol: str = "NONE"
     last_sentence: Optional[str] = None
     sentence_counts: dict[str, int] = field(default_factory=dict)
+    latest_nmea_raw: dict[str, str] = field(default_factory=dict)
 
     fix: str = "NO FIX"
     fix_quality: int = 0
