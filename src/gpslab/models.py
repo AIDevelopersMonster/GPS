@@ -41,6 +41,17 @@ class GPSState:
     ubx_hw_version: Optional[str] = None
     ubx_extensions: list[str] = field(default_factory=list)
 
+    usb_vendor_id: Optional[int] = None
+    usb_product_id: Optional[int] = None
+    usb_power_consumption_ma: Optional[int] = None
+    usb_flags: Optional[int] = None
+    usb_vendor_string: Optional[str] = None
+    usb_product_string: Optional[str] = None
+    usb_serial_number: Optional[str] = None
+
+    unique_id: Optional[str] = None
+    unique_id_version: Optional[int] = None
+
     @property
     def has_data(self) -> bool:
         return self.bytes_received > 0
@@ -50,10 +61,19 @@ class GPSState:
         return self.nmea_valid > 0 or self.ubx_frames > 0
 
     @property
+    def protocol_version(self) -> Optional[str]:
+        for item in self.ubx_extensions:
+            if item.startswith("PROTVER="):
+                return item.split("=", 1)[1].strip() or None
+        return None
+
+    @property
     def receiver_identity(self) -> Optional[str]:
         for item in self.ubx_extensions:
             if item.startswith("MOD="):
                 return item[4:].strip() or None
+        if self.usb_product_string:
+            return self.usb_product_string
         if self.ubx_sw_version or self.ubx_hw_version:
             return "u-blox compatible receiver"
         return None
@@ -85,4 +105,5 @@ class GPSState:
     def to_dict(self) -> dict:
         result = asdict(self)
         result["receiver_identity"] = self.receiver_identity
+        result["protocol_version"] = self.protocol_version
         return result
