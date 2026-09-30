@@ -50,6 +50,7 @@ class GPSDiagnostics:
 
             self.state.nmea_valid += 1
             self.state.last_sentence = sentence.message_type
+            self.state.latest_nmea_raw[sentence.message_type] = sentence.raw
             self.state.sentence_counts[sentence.message_type] = (
                 self.state.sentence_counts.get(sentence.message_type, 0) + 1
             )
