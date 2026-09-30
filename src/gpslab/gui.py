@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from .diagnostics import GPSDiagnostics
+from .nmea import explain_sentence, parse_sentence
 from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_port
 from .timecheck import utc_delta_seconds
 from .ubx import (
@@ -59,7 +60,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.2")
+        self.title("GPS Lab Diagnostic Console v0.3")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -158,10 +159,12 @@ class GPSGui(tk.Tk):
         overview = ttk.Frame(notebook, padding=12)
         identity = ttk.Frame(notebook, padding=12)
         ubx_terminal = ttk.Frame(notebook, padding=8)
+        nmea = ttk.Frame(notebook, padding=6)
         raw = ttk.Frame(notebook, padding=6)
 
         notebook.add(overview, text="Overview")
         notebook.add(identity, text="Identity / Time")
+        notebook.add(nmea, text="NMEA Decoder")
         notebook.add(ubx_terminal, text="UBX Terminal")
         notebook.add(raw, text="Raw Stream")
 
@@ -223,6 +226,76 @@ class GPSGui(tk.Tk):
         ttk.Button(identity, text="Poll SEC-UNIQID", command=lambda: self._send_named(SEC_UNIQID_POLL)).grid(
             row=11, column=0, sticky="w", pady=2
         )
+
+        self.nmea_notebook = ttk.Notebook(nmea)
+        self.nmea_notebook.pack(fill="both", expand=True)
+        self.nmea_views = {}
+
+        for message_type in ("GGA", "RMC", "GSA", "GSV", "GLL", "VTG", "TXT"):
+            frame = ttk.Frame(self.nmea_notebook, padding=8)
+            self.nmea_notebook.add(frame, text=f"GP{message_type}")
+
+            summary_var = tk.StringVar(value="Waiting for message...")
+            raw_var = tk.StringVar(value="-")
+            status_var = tk.StringVar(value="No data")
+
+            ttk.Label(
+                frame,
+                textvariable=summary_var,
+                font=("TkDefaultFont", 10, "bold"),
+                wraplength=940,
+                justify="left",
+            ).pack(anchor="w")
+
+            ttk.Label(
+                frame,
+                textvariable=status_var,
+                font=("TkDefaultFont", 9, "bold"),
+            ).pack(anchor="w", pady=(4, 6))
+
+            raw_box = ttk.LabelFrame(frame, text="Raw NMEA sentence", padding=6)
+            raw_box.pack(fill="x", pady=(0, 8))
+            ttk.Label(
+                raw_box,
+                textvariable=raw_var,
+                font=("Consolas", 9),
+                wraplength=940,
+                justify="left",
+            ).pack(anchor="w")
+
+            tree_frame = ttk.Frame(frame)
+            tree_frame.pack(fill="both", expand=True)
+
+            tree = ttk.Treeview(
+                tree_frame,
+                columns=("field", "raw", "decoded", "meaning"),
+                show="headings",
+                height=18,
+            )
+            tree.heading("field", text="Field")
+            tree.heading("raw", text="Raw")
+            tree.heading("decoded", text="Decoded")
+            tree.heading("meaning", text="What it means")
+            tree.column("field", width=150, anchor="w")
+            tree.column("raw", width=160, anchor="w")
+            tree.column("decoded", width=210, anchor="w")
+            tree.column("meaning", width=460, anchor="w")
+
+            y = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+            x = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+            tree.configure(yscrollcommand=y.set, xscrollcommand=x.set)
+            tree.grid(row=0, column=0, sticky="nsew")
+            y.grid(row=0, column=1, sticky="ns")
+            x.grid(row=1, column=0, sticky="ew")
+            tree_frame.rowconfigure(0, weight=1)
+            tree_frame.columnconfigure(0, weight=1)
+
+            self.nmea_views[message_type] = {
+                "summary": summary_var,
+                "raw": raw_var,
+                "status": status_var,
+                "tree": tree,
+            }
 
         terminal_controls = ttk.Frame(ubx_terminal)
         terminal_controls.pack(fill="x")
@@ -460,6 +533,7 @@ class GPSGui(tk.Tk):
         if self.diag.state.ubx_frames > before:
             self._append_ubx("RX", data)
         self._append_raw(data)
+        self._refresh_nmea_views()
         self._refresh_status()
 
     def _append_ubx(self, direction: str, data: bytes) -> None:
@@ -480,6 +554,43 @@ class GPSGui(tk.Tk):
 
         self.raw_text.see("end")
         self.raw_text.configure(state="disabled")
+
+
+    def _refresh_nmea_views(self) -> None:
+        latest = self.diag.state.latest_nmea_raw
+
+        for message_type, view in self.nmea_views.items():
+            raw = latest.get(message_type)
+            if not raw:
+                continue
+
+            sentence = parse_sentence(raw)
+            if sentence is None:
+                continue
+
+            info = explain_sentence(sentence)
+            view["summary"].set(info["summary"])
+            view["raw"].set(raw)
+            count = self.diag.state.sentence_counts.get(message_type, 0)
+            view["status"].set(
+                f"Sentence: {info['sentence_id']} | Checksum: {info['checksum']} | Count: {count}"
+            )
+
+            tree = view["tree"]
+            for item in tree.get_children():
+                tree.delete(item)
+
+            for row in info["rows"]:
+                tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        row["field"],
+                        row["raw"],
+                        row["decoded"],
+                        row["meaning"],
+                    ),
+                )
 
     def _refresh_status(self) -> None:
         s = self.diag.state
