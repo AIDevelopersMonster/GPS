@@ -7,7 +7,14 @@ from tkinter import filedialog, messagebox, ttk
 
 from .diagnostics import GPSDiagnostics
 from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_port
-from .ubx import MON_VER_POLL
+from .timecheck import utc_delta_seconds
+from .ubx import (
+    CFG_USB_POLL,
+    MON_VER_POLL,
+    SEC_UNIQID_POLL,
+    frame_name,
+    packet_is_valid,
+)
 
 
 class SerialWorker(threading.Thread):
@@ -37,6 +44,7 @@ class SerialWorker(threading.Thread):
                             break
                         ser.write(packet)
                         ser.flush()
+                        self.events.put(("tx", packet))
 
                     waiting = getattr(ser, "in_waiting", 0)
                     chunk = ser.read(waiting or 256)
@@ -51,9 +59,9 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.1")
-        self.geometry("980x700")
-        self.minsize(820, 580)
+        self.title("GPS Lab Diagnostic Console v0.2")
+        self.geometry("1080x760")
+        self.minsize(900, 640)
 
         self.events: queue.Queue = queue.Queue()
         self.worker: SerialWorker | None = None
@@ -64,8 +72,14 @@ class GPSGui(tk.Tk):
         self.port_var = tk.StringVar()
         self.baud_var = tk.StringVar(value="9600")
         self.connection_var = tk.StringVar(value="DISCONNECTED")
+        self.status_var = tk.StringVar(value="NO DATA")
         self.protocol_var = tk.StringVar(value="NONE")
         self.receiver_var = tk.StringVar(value="-")
+        self.sw_var = tk.StringVar(value="-")
+        self.hw_var = tk.StringVar(value="-")
+        self.protver_var = tk.StringVar(value="-")
+        self.serial_var = tk.StringVar(value="-")
+        self.unique_var = tk.StringVar(value="-")
         self.fix_var = tk.StringVar(value="NO FIX")
         self.sats_used_var = tk.StringVar(value="-")
         self.sats_visible_var = tk.StringVar(value="-")
@@ -74,8 +88,11 @@ class GPSGui(tk.Tk):
         self.lon_var = tk.StringVar(value="-")
         self.alt_var = tk.StringVar(value="-")
         self.utc_var = tk.StringVar(value="-")
+        self.host_utc_delta_var = tk.StringVar(value="-")
+        self.time_status_var = tk.StringVar(value="WAITING")
         self.rate_var = tk.StringVar(value="-")
         self.bytes_var = tk.StringVar(value="0")
+        self.ubx_hex_var = tk.StringVar()
 
         self._build_ui()
         self.refresh_ports()
@@ -87,36 +104,36 @@ class GPSGui(tk.Tk):
 
         ttk.Label(controls, text="Port").grid(row=0, column=0, sticky="w")
         self.port_combo = ttk.Combobox(
-            controls, textvariable=self.port_var, width=16, state="normal"
+            controls, textvariable=self.port_var, width=14, state="normal"
         )
         self.port_combo.grid(row=0, column=1, padx=(4, 10))
 
-        ttk.Button(
-            controls, text="Refresh", command=self.refresh_ports
-        ).grid(row=0, column=2, padx=(0, 10))
+        ttk.Button(controls, text="Refresh", command=self.refresh_ports).grid(
+            row=0, column=2, padx=(0, 10)
+        )
 
         ttk.Label(controls, text="Baud").grid(row=0, column=3, sticky="w")
         self.baud_combo = ttk.Combobox(
             controls,
             textvariable=self.baud_var,
             values=[str(x) for x in DEFAULT_BAUD_RATES],
-            width=10,
+            width=9,
             state="normal",
         )
         self.baud_combo.grid(row=0, column=4, padx=(4, 10))
 
-        ttk.Button(
-            controls, text="Auto Probe", command=self.auto_probe
-        ).grid(row=0, column=5, padx=4)
+        ttk.Button(controls, text="Auto Probe", command=self.auto_probe).grid(
+            row=0, column=5, padx=4
+        )
 
         self.connect_button = ttk.Button(
             controls, text="Connect", command=self.toggle_connection
         )
         self.connect_button.grid(row=0, column=6, padx=4)
 
-        ttk.Button(
-            controls, text="Identify UBX", command=self.identify_ubx
-        ).grid(row=0, column=7, padx=4)
+        ttk.Button(controls, text="Identify", command=self.identify_all).grid(
+            row=0, column=7, padx=4
+        )
 
         self.capture_button = ttk.Button(
             controls, text="Start Capture", command=self.toggle_capture
@@ -129,12 +146,23 @@ class GPSGui(tk.Tk):
             font=("TkDefaultFont", 10, "bold"),
         ).grid(row=1, column=0, columnspan=9, sticky="w", pady=(8, 0))
 
+        ttk.Label(
+            controls,
+            textvariable=self.status_var,
+            font=("TkDefaultFont", 12, "bold"),
+        ).grid(row=2, column=0, columnspan=9, sticky="w", pady=(4, 0))
+
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
         overview = ttk.Frame(notebook, padding=12)
+        identity = ttk.Frame(notebook, padding=12)
+        ubx_terminal = ttk.Frame(notebook, padding=8)
         raw = ttk.Frame(notebook, padding=6)
+
         notebook.add(overview, text="Overview")
+        notebook.add(identity, text="Identity / Time")
+        notebook.add(ubx_terminal, text="UBX Terminal")
         notebook.add(raw, text="Raw Stream")
 
         fields = [
@@ -148,6 +176,8 @@ class GPSGui(tk.Tk):
             ("Longitude", self.lon_var),
             ("Altitude", self.alt_var),
             ("UTC", self.utc_var),
+            ("Host UTC delta", self.host_utc_delta_var),
+            ("Time status", self.time_status_var),
             ("GGA rate", self.rate_var),
             ("Bytes received", self.bytes_var),
         ]
@@ -162,7 +192,63 @@ class GPSGui(tk.Tk):
                 font=("TkDefaultFont", 10, "bold"),
             ).grid(row=row, column=1, sticky="w", pady=3)
 
-        overview.columnconfigure(1, weight=1)
+        identity_fields = [
+            ("Receiver", self.receiver_var),
+            ("SW version", self.sw_var),
+            ("HW version", self.hw_var),
+            ("Protocol version", self.protver_var),
+            ("USB serial", self.serial_var),
+            ("Unique ID", self.unique_var),
+            ("UTC", self.utc_var),
+            ("Host UTC delta", self.host_utc_delta_var),
+            ("Time status", self.time_status_var),
+        ]
+
+        for row, (label, var) in enumerate(identity_fields):
+            ttk.Label(identity, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 16), pady=3
+            )
+            ttk.Label(
+                identity,
+                textvariable=var,
+                font=("TkDefaultFont", 10, "bold"),
+            ).grid(row=row, column=1, sticky="w", pady=3)
+
+        ttk.Button(identity, text="Poll MON-VER", command=lambda: self._send_named(MON_VER_POLL)).grid(
+            row=10, column=0, sticky="w", pady=(12, 2)
+        )
+        ttk.Button(identity, text="Poll CFG-USB", command=lambda: self._send_named(CFG_USB_POLL)).grid(
+            row=10, column=1, sticky="w", padx=(8, 0), pady=(12, 2)
+        )
+        ttk.Button(identity, text="Poll SEC-UNIQID", command=lambda: self._send_named(SEC_UNIQID_POLL)).grid(
+            row=11, column=0, sticky="w", pady=2
+        )
+
+        terminal_controls = ttk.Frame(ubx_terminal)
+        terminal_controls.pack(fill="x")
+
+        ttk.Label(terminal_controls, text="UBX packet hex").pack(side="left")
+        ttk.Entry(
+            terminal_controls,
+            textvariable=self.ubx_hex_var,
+            width=70,
+            font=("Consolas", 9),
+        ).pack(side="left", padx=8, fill="x", expand=True)
+        ttk.Button(
+            terminal_controls,
+            text="Send",
+            command=self.send_terminal_packet,
+        ).pack(side="left")
+
+        ttk.Label(
+            ubx_terminal,
+            text="Only complete UBX packets with valid checksum are transmitted.",
+        ).pack(anchor="w", pady=(6, 4))
+
+        self.ubx_text = tk.Text(
+            ubx_terminal, wrap="none", font=("Consolas", 9), state="disabled"
+        )
+        self.ubx_text.pack(fill="both", expand=True)
 
         self.raw_text = tk.Text(
             raw, wrap="none", font=("Consolas", 9), state="disabled"
@@ -220,17 +306,48 @@ class GPSGui(tk.Tk):
         self.connection_var.set("DISCONNECTED")
         self._stop_capture()
 
-    def identify_ubx(self) -> None:
+    def _ensure_connected(self) -> bool:
         if not self.worker or not self.worker.is_alive():
-            messagebox.showinfo(
-                "GPS Lab",
-                "Connect to the receiver first.",
+            messagebox.showinfo("GPS Lab", "Connect to the receiver first.")
+            return False
+        return True
+
+    def _send_named(self, packet: bytes) -> None:
+        if not self._ensure_connected():
+            return
+        self.worker.send(packet)
+
+    def identify_all(self) -> None:
+        if not self._ensure_connected():
+            return
+        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL):
+            self.worker.send(packet)
+        self.connection_var.set(
+            self.connection_var.get() + " | identity polls sent"
+        )
+
+    def send_terminal_packet(self) -> None:
+        if not self._ensure_connected():
+            return
+
+        text = self.ubx_hex_var.get().strip().replace(" ", "")
+        if text.lower().startswith("0x"):
+            text = text[2:]
+
+        try:
+            packet = bytes.fromhex(text)
+        except ValueError:
+            messagebox.showerror("UBX Terminal", "Invalid hexadecimal string.")
+            return
+
+        if not packet_is_valid(packet):
+            messagebox.showerror(
+                "UBX Terminal",
+                "Packet rejected: use a complete UBX packet with a valid checksum.",
             )
             return
-        self.worker.send(MON_VER_POLL)
-        self.connection_var.set(
-            self.connection_var.get() + " | UBX MON-VER poll sent"
-        )
+
+        self.worker.send(packet)
 
     def auto_probe(self) -> None:
         if self.worker and self.worker.is_alive():
@@ -262,8 +379,7 @@ class GPSGui(tk.Tk):
             self._stop_capture()
             return
 
-        if not self.worker or not self.worker.is_alive():
-            messagebox.showinfo("GPS Lab", "Connect before starting capture.")
+        if not self._ensure_connected():
             return
 
         path = filedialog.asksaveasfilename(
@@ -311,6 +427,8 @@ class GPSGui(tk.Tk):
                     self.disconnect()
                 elif kind == "data":
                     self._handle_data(payload)
+                elif kind == "tx":
+                    self._append_ubx("TX", payload)
                 elif kind == "probe_result":
                     self._handle_probe_result(payload)
         except queue.Empty:
@@ -337,9 +455,19 @@ class GPSGui(tk.Tk):
                 self._stop_capture()
                 messagebox.showerror("GPS Lab Capture", str(exc))
 
+        before = self.diag.state.ubx_frames
         self.diag.feed(data)
+        if self.diag.state.ubx_frames > before:
+            self._append_ubx("RX", data)
         self._append_raw(data)
         self._refresh_status()
+
+    def _append_ubx(self, direction: str, data: bytes) -> None:
+        line = f"{direction} {data.hex(' ').upper()}\n"
+        self.ubx_text.configure(state="normal")
+        self.ubx_text.insert("end", line)
+        self.ubx_text.see("end")
+        self.ubx_text.configure(state="disabled")
 
     def _append_raw(self, data: bytes) -> None:
         text = data.decode("ascii", "replace")
@@ -361,6 +489,11 @@ class GPSGui(tk.Tk):
 
         self.protocol_var.set(s.protocol)
         self.receiver_var.set(value(s.receiver_identity))
+        self.sw_var.set(value(s.ubx_sw_version))
+        self.hw_var.set(value(s.ubx_hw_version))
+        self.protver_var.set(value(s.protocol_version))
+        self.serial_var.set(value(s.usb_serial_number))
+        self.unique_var.set(value(s.unique_id))
         self.fix_var.set(s.fix)
         self.sats_used_var.set(value(s.satellites_used))
         self.sats_visible_var.set(value(s.satellites_visible))
@@ -371,10 +504,34 @@ class GPSGui(tk.Tk):
         self.utc_var.set(
             " ".join(x for x in (s.utc_date, s.utc_time) if x) or "-"
         )
+
+        delta = utc_delta_seconds(s.utc_date, s.utc_time)
+        if delta is None:
+            self.host_utc_delta_var.set("-")
+            self.time_status_var.set("WAITING")
+        else:
+            self.host_utc_delta_var.set(f"{delta:+.1f} s")
+            if (s.satellites_visible or 0) > 0 and abs(delta) <= 10.0:
+                self.time_status_var.set("TIME PASS")
+            else:
+                self.time_status_var.set("TIME PRESENT")
+
         self.rate_var.set(
             "-" if s.gga_rate_hz is None else f"{s.gga_rate_hz:.2f} Hz"
         )
         self.bytes_var.set(str(s.bytes_received))
+
+        if not s.has_data:
+            status = "NO DATA"
+        elif not s.has_protocol:
+            status = "DATA / UNKNOWN PROTOCOL"
+        elif self.time_status_var.get() == "TIME PASS" and s.fix == "NO FIX":
+            status = "RECEIVER ALIVE | TIME VALID | NO FIX"
+        elif s.fix == "NO FIX":
+            status = "RECEIVER ALIVE | NO FIX"
+        else:
+            status = f"RECEIVER ALIVE | {s.fix}"
+        self.status_var.set(status)
 
     def destroy(self) -> None:
         self.disconnect()
