@@ -5,7 +5,7 @@ from collections import deque
 
 from .models import GPSState
 from .nmea import decode_fields, parse_sentence
-from .ubx import extract_frames, parse_mon_ver
+from .ubx import extract_frames, parse_cfg_usb, parse_mon_ver, parse_sec_uniqid
 
 
 class GPSDiagnostics:
@@ -77,6 +77,23 @@ class GPSDiagnostics:
                     self.state.ubx_sw_version = info.get("sw_version")
                     self.state.ubx_hw_version = info.get("hw_version")
                     self.state.ubx_extensions = info.get("extensions", [])
+
+            elif frame.msg_class == 0x06 and frame.msg_id == 0x1B:
+                info = parse_cfg_usb(frame.payload)
+                if info:
+                    self.state.usb_vendor_id = info.get("vendor_id")
+                    self.state.usb_product_id = info.get("product_id")
+                    self.state.usb_power_consumption_ma = info.get("power_consumption_ma")
+                    self.state.usb_flags = info.get("flags")
+                    self.state.usb_vendor_string = info.get("vendor_string")
+                    self.state.usb_product_string = info.get("product_string")
+                    self.state.usb_serial_number = info.get("serial_number")
+
+            elif frame.msg_class == 0x27 and frame.msg_id == 0x03:
+                info = parse_sec_uniqid(frame.payload)
+                if info:
+                    self.state.unique_id_version = info.get("version")
+                    self.state.unique_id = info.get("unique_id")
 
     def _apply_values(self, values: dict) -> None:
         for key in (
