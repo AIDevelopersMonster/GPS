@@ -16,9 +16,17 @@ from .registry import (
     ensure_db,
     export_json,
     find_inspection_by_rinv,
+    get_inspection,
     preview_next_module_code,
     update_inspection,
     utc_now_iso,
+)
+from .registry_reports import (
+    backup_database,
+    export_csv,
+    generate_html_report,
+    query_inspections,
+    registry_summary,
 )
 from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_port
 from .timecheck import utc_delta_seconds
@@ -81,7 +89,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.5.2")
+        self.title("GPS Lab Diagnostic Console v0.6")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -133,6 +141,9 @@ class GPSGui(tk.Tk):
         self.registry_rinv_var = tk.StringVar(value="-")
         self.registry_state_var = tk.StringVar(value="IDLE")
         self.registry_last_var = tk.StringVar(value="-")
+        self.registry_filter_var = tk.StringVar()
+        self.registry_result_filter_var = tk.StringVar(value="ALL")
+        self.registry_summary_var = tk.StringVar(value="-")
 
         self._build_ui()
         self.refresh_ports()
@@ -545,6 +556,60 @@ class GPSGui(tk.Tk):
             justify="left",
         ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
+                manager_box = ttk.LabelFrame(registry, text="Registry manager", padding=10)
+        manager_box.pack(fill="both", expand=True)
+
+        filter_row = ttk.Frame(manager_box)
+        filter_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(filter_row, text="Module contains").pack(side="left")
+        ttk.Entry(filter_row, textvariable=self.registry_filter_var, width=24).pack(
+            side="left", padx=(6, 12)
+        )
+        ttk.Label(filter_row, text="Result").pack(side="left")
+        ttk.Combobox(
+            filter_row,
+            textvariable=self.registry_result_filter_var,
+            values=("ALL", "PASS", "PENDING", "PENDING_POWER_CYCLE", "WRITE_VERIFY_FAILED"),
+            width=24,
+            state="readonly",
+        ).pack(side="left", padx=(6, 12))
+        ttk.Button(filter_row, text="Refresh", command=self._refresh_registry_table).pack(side="left")
+        ttk.Button(filter_row, text="Summary", command=self._show_registry_summary).pack(
+            side="left", padx=(6, 0)
+        )
+
+        self.registry_tree = ttk.Treeview(
+            manager_box,
+            columns=("id", "module", "utc", "result", "profile", "receiver"),
+            show="headings",
+            height=7,
+        )
+        for key, title, width in (
+            ("id", "ID", 55),
+            ("module", "Module", 170),
+            ("utc", "Tested UTC", 175),
+            ("result", "Result", 170),
+            ("profile", "Profile", 130),
+            ("receiver", "Receiver", 190),
+        ):
+            self.registry_tree.heading(key, text=title)
+            self.registry_tree.column(key, width=width, anchor="w")
+        self.registry_tree.pack(fill="both", expand=True)
+
+        action_row = ttk.Frame(manager_box)
+        action_row.pack(fill="x", pady=(8, 0))
+        ttk.Button(action_row, text="Show record", command=self._show_selected_registry_record).pack(side="left")
+        ttk.Button(action_row, text="Export CSV", command=self._export_registry_csv).pack(side="left", padx=(6, 0))
+        ttk.Button(action_row, text="HTML report", command=self._export_registry_html).pack(side="left", padx=(6, 0))
+        ttk.Button(action_row, text="Backup DB", command=self._backup_registry_db).pack(side="left", padx=(6, 0))
+        ttk.Label(
+            action_row,
+            textvariable=self.registry_summary_var,
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side="right")
+
+        self._refresh_registry_table()
+
         self.nmea_notebook = ttk.Notebook(nmea)
         self.nmea_notebook.pack(fill="both", expand=True)
         self.nmea_views = {}
@@ -791,6 +856,120 @@ class GPSGui(tk.Tk):
         )
         self.after(1800, self._mark_identity_no_response)
 
+    def _refresh_registry_table(self) -> None:
+        if not hasattr(self, "registry_tree"):
+            return
+        for item in self.registry_tree.get_children():
+            self.registry_tree.delete(item)
+
+        rows = query_inspections(
+            module_contains=self.registry_filter_var.get().strip() or None,
+            result=self.registry_result_filter_var.get(),
+            limit=500,
+            db_path=DEFAULT_DB,
+        )
+        for row in rows:
+            self.registry_tree.insert(
+                "",
+                "end",
+                iid=str(row["id"]),
+                values=(
+                    row.get("id"),
+                    row.get("module_code"),
+                    row.get("tested_at_utc"),
+                    row.get("result"),
+                    row.get("profile"),
+                    row.get("receiver"),
+                ),
+            )
+
+        summary = registry_summary(DEFAULT_DB)
+        results = summary.get("results") or {}
+        self.registry_summary_var.set(
+            f"Records: {(summary.get('database') or {}).get('records', 0)} | "
+            + " | ".join(f"{k}: {v}" for k, v in results.items())
+        )
+
+    def _selected_registry_module(self) -> str | None:
+        selection = self.registry_tree.selection()
+        if not selection:
+            messagebox.showinfo("GPS Lab Registry", "Select a record first.")
+            return None
+        values = self.registry_tree.item(selection[0], "values")
+        return str(values[1]) if len(values) > 1 else None
+
+    def _show_selected_registry_record(self) -> None:
+        module_code = self._selected_registry_module()
+        if not module_code:
+            return
+        item = get_inspection(module_code, DEFAULT_DB)
+        if item is None:
+            messagebox.showerror("GPS Lab Registry", f"Record not found: {module_code}")
+            return
+
+        win = tk.Toplevel(self)
+        win.title(f"Registry record - {module_code}")
+        win.geometry("900x650")
+        text = tk.Text(win, wrap="word", font=("Consolas", 9))
+        text.pack(fill="both", expand=True)
+        import json
+        text.insert("1.0", json.dumps(item, ensure_ascii=False, indent=2, sort_keys=True))
+        text.configure(state="disabled")
+
+    def _show_registry_summary(self) -> None:
+        summary = registry_summary(DEFAULT_DB)
+        import json
+        messagebox.showinfo(
+            "GPS Lab Registry Summary",
+            json.dumps(summary, ensure_ascii=False, indent=2),
+        )
+
+    def _export_registry_csv(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Export registry CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        rows = query_inspections(
+            module_contains=self.registry_filter_var.get().strip() or None,
+            result=self.registry_result_filter_var.get(),
+            limit=1000000,
+            db_path=DEFAULT_DB,
+        )
+        out = export_csv(Path(path), db_path=DEFAULT_DB, rows=rows)
+        self.registry_last_var.set(f"CSV exported: {out}")
+
+    def _export_registry_html(self) -> None:
+        module_code = None
+        selection = self.registry_tree.selection()
+        if selection:
+            values = self.registry_tree.item(selection[0], "values")
+            if len(values) > 1:
+                module_code = str(values[1])
+
+        path = filedialog.asksaveasfilename(
+            title="Save HTML report",
+            defaultextension=".html",
+            filetypes=[("HTML", "*.html"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        out = generate_html_report(Path(path), module_code=module_code, db_path=DEFAULT_DB)
+        self.registry_last_var.set(f"HTML report: {out}")
+
+    def _backup_registry_db(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Backup GPS Lab database",
+            defaultextension=".sqlite3",
+            filetypes=[("SQLite", "*.sqlite3"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        out = backup_database(Path(path), DEFAULT_DB)
+        self.registry_last_var.set(f"Database backup: {out}")
+
     def _refresh_registry_status(self) -> None:
         status = db_status(DEFAULT_DB)
         self.db_path_var.set(status["path"])
@@ -806,6 +985,7 @@ class GPSGui(tk.Tk):
             self.db_status_var.set("NOT CREATED")
             self.db_records_var.set("0")
         self._preview_registry_id()
+        self._refresh_registry_table()
 
     def _create_registry_db(self) -> None:
         path = ensure_db(DEFAULT_DB)
