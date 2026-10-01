@@ -8,6 +8,10 @@ from .nmea import decode_fields, parse_sentence
 from .ubx import (
     extract_frames,
     parse_cfg_usb,
+    parse_mon_hw,
+    parse_mon_io,
+    parse_mon_rxbuf,
+    parse_mon_txbuf,
     parse_mon_ver,
     parse_nav_timeutc,
     parse_sec_uniqid,
@@ -118,6 +122,26 @@ class GPSDiagnostics:
                     self.state.ubx_utc_valid_tow = info.get("valid_tow")
                     self.state.ubx_utc_valid_week = info.get("valid_week")
                     self.state.ubx_utc_valid = info.get("valid_utc")
+
+            elif frame.msg_class == 0x0A and frame.msg_id == 0x09:
+                info = parse_mon_hw(frame.payload)
+                if info:
+                    self.state.mon_hw = info
+
+            elif frame.msg_class == 0x0A and frame.msg_id == 0x02:
+                info = parse_mon_io(frame.payload)
+                if info:
+                    self.state.mon_io = info
+
+            elif frame.msg_class == 0x0A and frame.msg_id == 0x07:
+                info = parse_mon_rxbuf(frame.payload)
+                if info:
+                    self.state.mon_rxbuf = info
+
+            elif frame.msg_class == 0x0A and frame.msg_id == 0x08:
+                info = parse_mon_txbuf(frame.payload)
+                if info:
+                    self.state.mon_txbuf = info
 
     def _apply_values(self, values: dict) -> None:
         for key in (
