@@ -18,7 +18,7 @@ py -m pip install -e .
 gps-gui
 ```
 
-## v0.2 functions
+## v0.4 functions
 
 - serial-port selection and refresh;
 - baud selection and automatic baud/protocol probe;
@@ -31,7 +31,10 @@ gps-gui
 - `MON-VER` software/hardware/protocol information;
 - `CFG-USB` serial string when implemented by the receiver;
 - `SEC-UNIQID` unique ID when implemented by the receiver generation;
-- UBX terminal with TX/RX log.
+- UBX terminal with TX/RX log;
+- Engineering tab with read-only MON-HW, MON-IO, MON-RXBUF and MON-TXBUF diagnostics;
+- RF/hardware view for noise, AGC, antenna state and receiver jamming indicators;
+- I/O error counters and RX/TX buffer load views.
 
 ## Identity
 
@@ -58,3 +61,27 @@ B5 62 0A 04 00 00 0E 34
 ```
 
 CLI and GUI use the same parser and diagnostic state model.
+
+
+## Engineering diagnostics
+
+The Engineering tab sends read-only monitor polls only:
+
+```text
+UBX-MON-HW
+UBX-MON-IO
+UBX-MON-RXBUF
+UBX-MON-TXBUF
+```
+
+`MON-HW` exposes receiver hardware/RF diagnostics such as noise level,
+AGC count, antenna status, and the receiver's jamming indicators. These
+values are diagnostic observations from the receiver; by themselves they
+do not identify an interference source and do not prove spoofing.
+
+`MON-IO` shows per-port RX/TX byte counters and serial errors.
+`MON-RXBUF` and `MON-TXBUF` expose pending bytes and buffer usage.
+
+Configuration writes are intentionally not enabled in this first
+Engineering step. The next write-capable layer should follow:
+READ current -> show OLD/NEW -> write RAM -> ACK -> read back -> optional SAVE.
