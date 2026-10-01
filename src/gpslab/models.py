@@ -53,6 +53,14 @@ class GPSState:
     unique_id: Optional[str] = None
     unique_id_version: Optional[int] = None
 
+    rinv_flags: Optional[int] = None
+    rinv_dump: Optional[bool] = None
+    rinv_binary: Optional[bool] = None
+    rinv_data: bytes = b""
+    rinv_text: Optional[str] = None
+    rinv_hex: Optional[str] = None
+    rinv_is_default_empty: Optional[bool] = None
+
     ubx_utc_itow_ms: Optional[int] = None
     ubx_utc_time_accuracy_ns: Optional[int] = None
     ubx_utc_nano_ns: Optional[int] = None
