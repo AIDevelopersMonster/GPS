@@ -39,6 +39,10 @@ MON_VER_POLL = build_packet(0x0A, 0x04)
 CFG_USB_POLL = build_packet(0x06, 0x1B)
 SEC_UNIQID_POLL = build_packet(0x27, 0x03)
 NAV_TIMEUTC_POLL = build_packet(0x01, 0x21)
+MON_HW_POLL = build_packet(0x0A, 0x09)
+MON_IO_POLL = build_packet(0x0A, 0x02)
+MON_RXBUF_POLL = build_packet(0x0A, 0x07)
+MON_TXBUF_POLL = build_packet(0x0A, 0x08)
 
 
 def packet_is_valid(packet: bytes) -> bool:
@@ -175,12 +179,177 @@ def parse_nav_timeutc(payload: bytes) -> dict:
     }
 
 
+
+
+PORT_NAMES = {
+    0: "DDC/I2C",
+    1: "UART1",
+    2: "UART2",
+    3: "USB",
+    4: "SPI",
+}
+
+
+def parse_mon_hw(payload: bytes) -> dict:
+    """Parse u-blox MON-HW common fields, including u-blox 6 interference data."""
+    if len(payload) < 24:
+        return {}
+
+    flags = payload[22]
+    antenna_status_code = payload[20]
+    antenna_power_code = payload[21]
+    antenna_status_names = {
+        0: "INIT",
+        1: "DONTKNOW",
+        2: "OK",
+        3: "SHORT",
+        4: "OPEN",
+    }
+    antenna_power_names = {
+        0: "OFF",
+        1: "ON",
+        2: "DONTKNOW",
+    }
+    jamming_state = (flags >> 2) & 0x03
+    jamming_state_names = {
+        0: "UNKNOWN / DISABLED",
+        1: "OK",
+        2: "WARNING",
+        3: "CRITICAL",
+    }
+
+    jam_ind = None
+    if len(payload) >= 68:
+        jam_ind = payload[53]
+    elif len(payload) >= 60:
+        jam_ind = payload[45]
+
+    result = {
+        "payload_length": len(payload),
+        "pin_sel": int.from_bytes(payload[0:4], "little"),
+        "pin_bank": int.from_bytes(payload[4:8], "little"),
+        "pin_dir": int.from_bytes(payload[8:12], "little"),
+        "pin_val": int.from_bytes(payload[12:16], "little"),
+        "noise_per_ms": int.from_bytes(payload[16:18], "little"),
+        "agc_cnt": int.from_bytes(payload[18:20], "little"),
+        "antenna_status_code": antenna_status_code,
+        "antenna_status": antenna_status_names.get(
+            antenna_status_code, f"UNKNOWN({antenna_status_code})"
+        ),
+        "antenna_power_code": antenna_power_code,
+        "antenna_power": antenna_power_names.get(
+            antenna_power_code, f"UNKNOWN({antenna_power_code})"
+        ),
+        "flags": flags,
+        "rtc_calib": bool(flags & 0x01),
+        "safe_boot": bool(flags & 0x02),
+        "jamming_state": jamming_state,
+        "jamming_state_name": jamming_state_names[jamming_state],
+        "used_mask": int.from_bytes(payload[24:28], "little")
+        if len(payload) >= 28
+        else None,
+        "jam_ind": jam_ind,
+    }
+
+    if len(payload) >= 68:
+        result.update(
+            pin_irq=int.from_bytes(payload[56:60], "little"),
+            pull_h=int.from_bytes(payload[60:64], "little"),
+            pull_l=int.from_bytes(payload[64:68], "little"),
+        )
+    elif len(payload) >= 60:
+        result.update(
+            pin_irq=int.from_bytes(payload[48:52], "little"),
+            pull_h=int.from_bytes(payload[52:56], "little"),
+            pull_l=int.from_bytes(payload[56:60], "little"),
+        )
+
+    return result
+
+
+def parse_mon_io(payload: bytes) -> list[dict]:
+    """Parse MON-IO repeated 20-byte port blocks."""
+    if len(payload) < 20 or len(payload) % 20:
+        return []
+
+    ports = []
+    for index in range(len(payload) // 20):
+        offset = index * 20
+        ports.append(
+            {
+                "port": index,
+                "name": PORT_NAMES.get(index, f"PORT{index}"),
+                "rx_bytes": int.from_bytes(payload[offset : offset + 4], "little"),
+                "tx_bytes": int.from_bytes(payload[offset + 4 : offset + 8], "little"),
+                "parity_errs": int.from_bytes(payload[offset + 8 : offset + 10], "little"),
+                "framing_errs": int.from_bytes(payload[offset + 10 : offset + 12], "little"),
+                "overrun_errs": int.from_bytes(payload[offset + 12 : offset + 14], "little"),
+                "break_cond": int.from_bytes(payload[offset + 14 : offset + 16], "little"),
+                "rx_busy": bool(payload[offset + 16]),
+                "tx_busy": bool(payload[offset + 17]),
+            }
+        )
+    return ports
+
+
+def parse_mon_rxbuf(payload: bytes) -> list[dict]:
+    """Parse MON-RXBUF six target buffer entries."""
+    if len(payload) < 24:
+        return []
+
+    rows = []
+    for index in range(6):
+        rows.append(
+            {
+                "target": index,
+                "name": PORT_NAMES.get(index, f"TARGET{index}"),
+                "pending": int.from_bytes(payload[index * 2 : index * 2 + 2], "little"),
+                "usage": payload[12 + index],
+                "peak_usage": payload[18 + index],
+            }
+        )
+    return rows
+
+
+def parse_mon_txbuf(payload: bytes) -> dict:
+    """Parse MON-TXBUF six target entries and aggregate status."""
+    if len(payload) < 28:
+        return {}
+
+    rows = []
+    for index in range(6):
+        rows.append(
+            {
+                "target": index,
+                "name": PORT_NAMES.get(index, f"TARGET{index}"),
+                "pending": int.from_bytes(payload[index * 2 : index * 2 + 2], "little"),
+                "usage": payload[12 + index],
+                "peak_usage": payload[18 + index],
+            }
+        )
+
+    errors = payload[26]
+    return {
+        "targets": rows,
+        "total_usage": payload[24],
+        "total_peak_usage": payload[25],
+        "errors": errors,
+        "limit_reached": bool(errors & 0x01),
+        "memory_allocation_error": bool(errors & 0x02),
+        "allocation_error": bool(errors & 0x04),
+    }
+
+
 def frame_name(msg_class: int, msg_id: int) -> str:
     names = {
         (0x0A, 0x04): "MON-VER",
         (0x06, 0x1B): "CFG-USB",
         (0x27, 0x03): "SEC-UNIQID",
         (0x01, 0x21): "NAV-TIMEUTC",
+        (0x0A, 0x09): "MON-HW",
+        (0x0A, 0x02): "MON-IO",
+        (0x0A, 0x07): "MON-RXBUF",
+        (0x0A, 0x08): "MON-TXBUF",
         (0x05, 0x00): "ACK-NAK",
         (0x05, 0x01): "ACK-ACK",
     }
