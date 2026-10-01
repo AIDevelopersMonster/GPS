@@ -67,6 +67,11 @@ class GPSState:
     ubx_utc_valid_week: Optional[bool] = None
     ubx_utc_valid: Optional[bool] = None
 
+    mon_hw: dict = field(default_factory=dict)
+    mon_io: list[dict] = field(default_factory=list)
+    mon_rxbuf: list[dict] = field(default_factory=list)
+    mon_txbuf: dict = field(default_factory=dict)
+
     @property
     def has_data(self) -> bool:
         return self.bytes_received > 0
