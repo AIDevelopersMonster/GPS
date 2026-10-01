@@ -15,6 +15,35 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def db_status(path: Path = DEFAULT_DB) -> dict[str, Any]:
+    path = Path(path).expanduser()
+    result: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.is_file(),
+        "size_bytes": path.stat().st_size if path.is_file() else 0,
+        "records": 0,
+        "schema_version": None,
+    }
+    if not path.is_file():
+        return result
+
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as con:
+            row = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='inspections'"
+            ).fetchone()
+            if row:
+                result["records"] = int(
+                    con.execute("SELECT COUNT(*) FROM inspections").fetchone()[0]
+                )
+            result["schema_version"] = int(
+                con.execute("PRAGMA user_version").fetchone()[0]
+            )
+    except sqlite3.Error as exc:
+        result["error"] = str(exc)
+    return result
+
+
 def ensure_db(path: Path = DEFAULT_DB) -> Path:
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +86,19 @@ def next_module_code(con: sqlite3.Connection, tested_at_utc: str) -> str:
         except Exception:
             seq = 1
     return f"GPS6-{year}-{seq:05d}"
+
+
+def preview_next_module_code(
+    tested_at_utc: str | None = None,
+    db_path: Path = DEFAULT_DB,
+) -> str:
+    tested_at_utc = tested_at_utc or utc_now_iso()
+    path = Path(db_path).expanduser()
+    if not path.is_file():
+        dt = datetime.fromisoformat(tested_at_utc.replace("Z", "+00:00"))
+        return f"GPS6-{dt.year}-00001"
+    with sqlite3.connect(path) as con:
+        return next_module_code(con, tested_at_utc)
 
 
 def build_rinv_text(module_code: str, tested_at_utc: str) -> str:
@@ -170,3 +212,56 @@ def export_json(output: Path, db_path: Path = DEFAULT_DB) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
+
+
+def update_inspection(
+    module_code: str,
+    *,
+    result: str | None = None,
+    rinv_after: str | None = None,
+    payload: dict[str, Any] | None = None,
+    db_path: Path = DEFAULT_DB,
+) -> None:
+    path = Path(db_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    sets: list[str] = []
+    values: list[Any] = []
+    if result is not None:
+        sets.append("result=?")
+        values.append(result)
+    if rinv_after is not None:
+        sets.append("rinv_after=?")
+        values.append(rinv_after)
+    if payload is not None:
+        sets.append("payload_json=?")
+        values.append(json.dumps(_json_ready(payload), ensure_ascii=False, sort_keys=True))
+    if not sets:
+        return
+
+    values.append(module_code)
+    with sqlite3.connect(path) as con:
+        cur = con.execute(
+            f"UPDATE inspections SET {', '.join(sets)} WHERE module_code=?",
+            tuple(values),
+        )
+        if cur.rowcount != 1:
+            raise KeyError(module_code)
+
+
+def get_inspection(module_code: str, db_path: Path = DEFAULT_DB) -> dict[str, Any] | None:
+    path = Path(db_path).expanduser()
+    if not path.is_file():
+        return None
+    with sqlite3.connect(path) as con:
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT * FROM inspections WHERE module_code=?",
+            (module_code,),
+        ).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    item["payload"] = json.loads(item.pop("payload_json"))
+    return item
