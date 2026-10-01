@@ -81,7 +81,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.5.1")
+        self.title("GPS Lab Diagnostic Console v0.5.2")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -641,16 +641,24 @@ class GPSGui(tk.Tk):
         )
         self.ubx_text.pack(fill="both", expand=True)
 
+        raw_controls = ttk.Frame(raw)
+        raw_controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Button(
+            raw_controls,
+            text="Clear Log",
+            command=self._clear_raw_stream,
+        ).pack(side="left")
+
         self.raw_text = tk.Text(
             raw, wrap="none", font=("Consolas", 9), state="disabled"
         )
         ybar = ttk.Scrollbar(raw, orient="vertical", command=self.raw_text.yview)
         xbar = ttk.Scrollbar(raw, orient="horizontal", command=self.raw_text.xview)
         self.raw_text.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
-        self.raw_text.grid(row=0, column=0, sticky="nsew")
-        ybar.grid(row=0, column=1, sticky="ns")
-        xbar.grid(row=1, column=0, sticky="ew")
-        raw.rowconfigure(0, weight=1)
+        self.raw_text.grid(row=1, column=0, sticky="nsew")
+        ybar.grid(row=1, column=1, sticky="ns")
+        xbar.grid(row=2, column=0, sticky="ew")
+        raw.rowconfigure(1, weight=1)
         raw.columnconfigure(0, weight=1)
 
     def refresh_ports(self) -> None:
@@ -1230,6 +1238,12 @@ class GPSGui(tk.Tk):
         self.ubx_text.insert("end", line)
         self.ubx_text.see("end")
         self.ubx_text.configure(state="disabled")
+
+    def _clear_raw_stream(self) -> None:
+        """Clear only the visible Raw Stream log; keep diagnostics and capture running."""
+        self.raw_text.configure(state="normal")
+        self.raw_text.delete("1.0", "end")
+        self.raw_text.configure(state="disabled")
 
     def _append_raw(self, data: bytes) -> None:
         text = data.decode("ascii", "replace")
