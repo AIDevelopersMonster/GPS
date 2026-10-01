@@ -45,6 +45,35 @@ MON_IO_POLL = build_packet(0x0A, 0x02)
 MON_RXBUF_POLL = build_packet(0x0A, 0x07)
 MON_TXBUF_POLL = build_packet(0x0A, 0x08)
 
+RINV_CONF_MASK = 0x00000200
+CFG_DEVICE_BBR = 0x01
+CFG_DEVICE_FLASH = 0x02
+CFG_DEVICE_EEPROM = 0x04
+CFG_DEVICE_SPI_FLASH = 0x10
+
+
+def build_cfg_rinv_write(data: bytes, *, binary: bool = True, dump: bool = False) -> bytes:
+    """Build UBX-CFG-RINV write packet for up to 30 bytes of remote inventory data."""
+    if len(data) > 30:
+        raise ValueError("CFG-RINV data must be at most 30 bytes")
+    flags = (0x02 if binary else 0) | (0x01 if dump else 0)
+    payload = bytes([flags]) + data.ljust(30, b"\x00")
+    return build_packet(0x06, 0x34, payload)
+
+
+def build_cfg_cfg_save_rinv(*, device_mask: int = CFG_DEVICE_EEPROM) -> bytes:
+    """Save only the Remote Inventory configuration group to selected NVM device(s)."""
+    clear_mask = 0
+    save_mask = RINV_CONF_MASK
+    load_mask = 0
+    payload = (
+        clear_mask.to_bytes(4, "little")
+        + save_mask.to_bytes(4, "little")
+        + load_mask.to_bytes(4, "little")
+        + bytes([device_mask & 0xFF])
+    )
+    return build_packet(0x06, 0x09, payload)
+
 
 def packet_is_valid(packet: bytes) -> bool:
     if len(packet) < 8 or packet[:2] != SYNC:
