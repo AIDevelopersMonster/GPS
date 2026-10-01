@@ -44,7 +44,7 @@ def query_inspections(
         params.append(date_to)
 
     sql = (
-        "SELECT id, module_code, tested_at_utc, board, receiver, sw_version, "
+        "SELECT id, module_code, factory_id, identity_source, tested_at_utc, board, receiver, sw_version, "
         "hw_version, result, profile, rinv_before, rinv_after FROM inspections"
     )
     if where:
@@ -101,7 +101,7 @@ def export_csv(
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
-        "id", "module_code", "tested_at_utc", "board", "receiver",
+        "id", "module_code", "factory_id", "identity_source", "tested_at_utc", "board", "receiver",
         "sw_version", "hw_version", "result", "profile",
         "rinv_before", "rinv_after",
     ]
@@ -153,6 +153,7 @@ def generate_html_report(
             "<tr>"
             f"<td>{esc(row.get('id'))}</td>"
             f"<td>{esc(row.get('module_code'))}</td>"
+            f"<td>{esc(row.get('factory_id'))}</td>"
             f"<td>{esc(row.get('tested_at_utc'))}</td>"
             f"<td>{esc(row.get('board'))}</td>"
             f"<td>{esc(row.get('receiver'))}</td>"
@@ -198,7 +199,7 @@ pre {{ white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f7f7; padd
 </div>
 <table>
 <thead><tr>
-<th>ID</th><th>Module</th><th>Tested UTC</th><th>Board</th><th>Receiver</th>
+<th>ID</th><th>Record / Module</th><th>Factory ID</th><th>Tested UTC</th><th>Board</th><th>Receiver</th>
 <th>SW</th><th>HW</th><th>Result</th><th>Profile</th><th>RINV</th>
 </tr></thead>
 <tbody>{''.join(body_rows)}</tbody>
