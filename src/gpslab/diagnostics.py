@@ -5,7 +5,13 @@ from collections import deque
 
 from .models import GPSState
 from .nmea import decode_fields, parse_sentence
-from .ubx import extract_frames, parse_cfg_usb, parse_mon_ver, parse_sec_uniqid
+from .ubx import (
+    extract_frames,
+    parse_cfg_usb,
+    parse_mon_ver,
+    parse_nav_timeutc,
+    parse_sec_uniqid,
+)
 
 
 class GPSDiagnostics:
@@ -95,6 +101,23 @@ class GPSDiagnostics:
                 if info:
                     self.state.unique_id_version = info.get("version")
                     self.state.unique_id = info.get("unique_id")
+
+            elif frame.msg_class == 0x01 and frame.msg_id == 0x21:
+                info = parse_nav_timeutc(frame.payload)
+                if info:
+                    self.state.ubx_utc_itow_ms = info.get("itow_ms")
+                    self.state.ubx_utc_time_accuracy_ns = info.get("time_accuracy_ns")
+                    self.state.ubx_utc_nano_ns = info.get("nano_ns")
+                    self.state.ubx_utc_year = info.get("year")
+                    self.state.ubx_utc_month = info.get("month")
+                    self.state.ubx_utc_day = info.get("day")
+                    self.state.ubx_utc_hour = info.get("hour")
+                    self.state.ubx_utc_minute = info.get("minute")
+                    self.state.ubx_utc_second = info.get("second")
+                    self.state.ubx_utc_valid_flags = info.get("valid_flags")
+                    self.state.ubx_utc_valid_tow = info.get("valid_tow")
+                    self.state.ubx_utc_valid_week = info.get("valid_week")
+                    self.state.ubx_utc_valid = info.get("valid_utc")
 
     def _apply_values(self, values: dict) -> None:
         for key in (
