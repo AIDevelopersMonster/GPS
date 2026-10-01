@@ -136,6 +136,7 @@ class GPSGui(tk.Tk):
         self.pcas_command_var = tk.StringVar(value="$PCAS06,0*1B")
         self.pcas_show_all_var = tk.BooleanVar(value=False)
         self.pcas_status_var = tk.StringVar(value="Ready")
+        self.pcas_rx_buffer = ""
 
         self.db_path_var = tk.StringVar(value=str(DEFAULT_DB))
         self.db_status_var = tk.StringVar(value="NOT CHECKED")
@@ -775,10 +776,17 @@ class GPSGui(tk.Tk):
             font=("TkDefaultFont", 9, "bold"),
         ).pack(side="right")
 
+        pcas_text_frame = ttk.Frame(pcas_terminal)
+        pcas_text_frame.pack(fill="both", expand=True)
         self.pcas_text = tk.Text(
-            pcas_terminal, wrap="none", font=("Consolas", 9), state="disabled"
+            pcas_text_frame, wrap="char", font=("Consolas", 9), state="disabled"
         )
-        self.pcas_text.pack(fill="both", expand=True)
+        pcas_ybar = ttk.Scrollbar(
+            pcas_text_frame, orient="vertical", command=self.pcas_text.yview
+        )
+        self.pcas_text.configure(yscrollcommand=pcas_ybar.set)
+        self.pcas_text.pack(side="left", fill="both", expand=True)
+        pcas_ybar.pack(side="right", fill="y")
 
         raw_controls = ttk.Frame(raw)
         raw_controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
@@ -1357,7 +1365,7 @@ class GPSGui(tk.Tk):
             raise ValueError("Empty PCAS command")
         if command.startswith("$"):
             command = command[1:]
-        command = command.replace("\\r", "").replace("\\n", "")
+        command = command.replace("\r", "").replace("\n", "")
 
         if "*" in command:
             payload, supplied = command.rsplit("*", 1)
@@ -1373,22 +1381,47 @@ class GPSGui(tk.Tk):
                 raise ValueError(
                     f"Checksum mismatch: supplied {supplied}, expected {expected:02X}"
                 )
-            return f"$" + payload + f"*{expected:02X}\\r\\n"
+            return f"$" + payload + f"*{expected:02X}\r\n"
 
         payload = command
         checksum = cls._pcas_checksum(payload)
-        return f"$" + payload + f"*{checksum:02X}\\r\\n"
+        return f"$" + payload + f"*{checksum:02X}\r\n"
 
     def _append_pcas(self, direction: str, text: str) -> None:
         if not hasattr(self, "pcas_text"):
             return
-        line = f"{direction} {text.rstrip()}\\n"
+        line = f"{direction} {text.rstrip()}\n"
         self.pcas_text.configure(state="normal")
         self.pcas_text.insert("end", line)
         self.pcas_text.see("end")
         self.pcas_text.configure(state="disabled")
 
+    def _feed_pcas_terminal(self, data: bytes) -> None:
+        """Display serial ASCII as complete terminal lines, preserving split CR/LF frames."""
+        text = data.decode("ascii", "replace")
+        self.pcas_rx_buffer += text
+        normalized = self.pcas_rx_buffer.replace("\r\n", "\n").replace("\r", "\n")
+
+        parts = normalized.split("\n")
+        self.pcas_rx_buffer = parts.pop()
+
+        for line in parts:
+            if not line:
+                continue
+            if (
+                self.pcas_show_all_var.get()
+                or line.startswith("$PCAS")
+                or line.startswith("$GPTXT")
+            ):
+                self._append_pcas("RX", line)
+
+        # Avoid unbounded growth if a device sends non-line-oriented binary/noise.
+        if len(self.pcas_rx_buffer) > 8192:
+            tail = self.pcas_rx_buffer[-8192:]
+            self.pcas_rx_buffer = tail
+
     def _clear_pcas_terminal(self) -> None:
+        self.pcas_rx_buffer = ""
         self.pcas_text.configure(state="normal")
         self.pcas_text.delete("1.0", "end")
         self.pcas_text.configure(state="disabled")
@@ -1565,15 +1598,7 @@ class GPSGui(tk.Tk):
         if self.diag.state.ubx_frames > before:
             self._append_ubx("RX", data)
         self._append_raw(data)
-        try:
-            ascii_text = data.decode("ascii", "replace")
-            for line in ascii_text.replace("\r", "").split("\n"):
-                if not line:
-                    continue
-                if self.pcas_show_all_var.get() or line.startswith("$PCAS") or line.startswith("$GPTXT"):
-                    self._append_pcas("RX", line)
-        except Exception:
-            pass
+        self._feed_pcas_terminal(data)
         self._refresh_nmea_views()
         self._refresh_engineering()
         self._refresh_status()
