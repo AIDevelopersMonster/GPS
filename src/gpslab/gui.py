@@ -556,7 +556,7 @@ class GPSGui(tk.Tk):
             justify="left",
         ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-                manager_box = ttk.LabelFrame(registry, text="Registry manager", padding=10)
+        manager_box = ttk.LabelFrame(registry, text="Registry manager", padding=10)
         manager_box.pack(fill="both", expand=True)
 
         filter_row = ttk.Frame(manager_box)
