@@ -8,11 +8,24 @@ from tkinter import filedialog, messagebox, ttk
 
 from .diagnostics import GPSDiagnostics
 from .nmea import explain_sentence, parse_sentence
+from .registry import (
+    DEFAULT_DB,
+    add_inspection,
+    db_status,
+    ensure_db,
+    export_json,
+    find_inspection_by_rinv,
+    preview_next_module_code,
+    update_inspection,
+    utc_now_iso,
+)
 from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_port
 from .timecheck import utc_delta_seconds
 from .ubx import (
     CFG_RINV_POLL,
     CFG_USB_POLL,
+    build_cfg_cfg_save_rinv,
+    build_cfg_rinv_write,
     MON_HW_POLL,
     MON_IO_POLL,
     MON_RXBUF_POLL,
@@ -67,7 +80,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.4.1")
+        self.title("GPS Lab Diagnostic Console v0.5")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -111,8 +124,17 @@ class GPSGui(tk.Tk):
         self.bytes_var = tk.StringVar(value="0")
         self.ubx_hex_var = tk.StringVar()
 
+        self.db_path_var = tk.StringVar(value=str(DEFAULT_DB))
+        self.db_status_var = tk.StringVar(value="NOT CHECKED")
+        self.db_records_var = tk.StringVar(value="0")
+        self.registry_next_var = tk.StringVar(value="-")
+        self.registry_rinv_var = tk.StringVar(value="-")
+        self.registry_state_var = tk.StringVar(value="IDLE")
+        self.registry_last_var = tk.StringVar(value="-")
+
         self._build_ui()
         self.refresh_ports()
+        self._refresh_registry_status()
         self.after(100, self._poll_events)
 
     def _build_ui(self) -> None:
@@ -181,6 +203,7 @@ class GPSGui(tk.Tk):
         overview = ttk.Frame(notebook, padding=12)
         identity = ttk.Frame(notebook, padding=12)
         engineering = ttk.Frame(notebook, padding=8)
+        registry = ttk.Frame(notebook, padding=8)
         ubx_terminal = ttk.Frame(notebook, padding=8)
         nmea = ttk.Frame(notebook, padding=6)
         raw = ttk.Frame(notebook, padding=6)
@@ -189,6 +212,7 @@ class GPSGui(tk.Tk):
         notebook.add(identity, text="Identity / Time")
         notebook.add(nmea, text="NMEA Decoder")
         notebook.add(engineering, text="Engineering")
+        notebook.add(registry, text="Registry / Provisioning")
         notebook.add(ubx_terminal, text="UBX Terminal")
         notebook.add(raw, text="Raw Stream")
 
@@ -443,6 +467,80 @@ class GPSGui(tk.Tk):
             tx_box, textvariable=self.eng_tx_status_var, font=("TkDefaultFont", 9, "bold")
         ).pack(anchor="w", pady=(6, 0))
 
+        db_box = ttk.LabelFrame(registry, text="Local inspection database", padding=10)
+        db_box.pack(fill="x", pady=(0, 10))
+
+        db_rows = [
+            ("Path", self.db_path_var),
+            ("Physical file status", self.db_status_var),
+            ("Records", self.db_records_var),
+        ]
+        for row, (label, var) in enumerate(db_rows):
+            ttk.Label(db_box, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 12), pady=3
+            )
+            ttk.Label(
+                db_box, textvariable=var, font=("TkDefaultFont", 10, "bold")
+            ).grid(row=row, column=1, sticky="w", pady=3)
+
+        ttk.Button(
+            db_box, text="Check database", command=self._refresh_registry_status
+        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(
+            db_box, text="Create database", command=self._create_registry_db
+        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Button(
+            db_box, text="Export JSON", command=self._export_registry_json
+        ).grid(row=3, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        ttk.Label(
+            db_box,
+            text=(
+                "The status check never creates the database. If the SQLite file is absent, "
+                "the GUI reports NOT CREATED. Creation happens only after pressing Create database."
+            ),
+            wraplength=920,
+            justify="left",
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        prov_box = ttk.LabelFrame(registry, text="Technological module record", padding=10)
+        prov_box.pack(fill="x", pady=(0, 10))
+
+        prov_rows = [
+            ("Next module number", self.registry_next_var),
+            ("Planned CFG-RINV text", self.registry_rinv_var),
+            ("Provisioning state", self.registry_state_var),
+            ("Last result", self.registry_last_var),
+        ]
+        for row, (label, var) in enumerate(prov_rows):
+            ttk.Label(prov_box, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 12), pady=3
+            )
+            ttk.Label(
+                prov_box, textvariable=var, font=("TkDefaultFont", 10, "bold")
+            ).grid(row=row, column=1, sticky="w", pady=3)
+
+        ttk.Button(
+            prov_box, text="Preview next ID", command=self._preview_registry_id
+        ).grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(
+            prov_box, text="Provision tested module", command=self._provision_current_module
+        ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Button(
+            prov_box, text="Verify after power cycle", command=self._verify_persisted_module
+        ).grid(row=4, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        ttk.Label(
+            prov_box,
+            text=(
+                "Provision writes a plain human-readable marker only after RINV is confirmed empty "
+                "and the current diagnostic checks pass. It then reads the marker back and saves "
+                "only rinvConf to EEPROM. Final PASS is recorded only after a later power-cycle verification."
+            ),
+            wraplength=920,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
         self.nmea_notebook = ttk.Notebook(nmea)
         self.nmea_notebook.pack(fill="both", expand=True)
         self.nmea_views = {}
@@ -652,6 +750,217 @@ class GPSGui(tk.Tk):
             self.connection_var.get() + " | identity polls sent"
         )
         self.after(1500, self._mark_identity_no_response)
+
+    def _refresh_registry_status(self) -> None:
+        status = db_status(DEFAULT_DB)
+        self.db_path_var.set(status["path"])
+        if status.get("exists"):
+            if status.get("error"):
+                self.db_status_var.set("ERROR: " + str(status["error"]))
+            else:
+                self.db_status_var.set(
+                    f"EXISTS | {status.get('size_bytes', 0)} bytes | schema {status.get('schema_version')}"
+                )
+            self.db_records_var.set(str(status.get("records", 0)))
+        else:
+            self.db_status_var.set("NOT CREATED")
+            self.db_records_var.set("0")
+        self._preview_registry_id()
+
+    def _create_registry_db(self) -> None:
+        path = ensure_db(DEFAULT_DB)
+        self.registry_last_var.set(f"Database created/opened: {path}")
+        self._refresh_registry_status()
+
+    def _export_registry_json(self) -> None:
+        status = db_status(DEFAULT_DB)
+        if not status.get("exists"):
+            messagebox.showinfo("GPS Lab Registry", "Database does not exist yet.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export GPS Lab registry as JSON",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        out = export_json(Path(path), DEFAULT_DB)
+        self.registry_last_var.set(f"Exported: {out}")
+
+    def _preview_registry_id(self) -> None:
+        tested_at = utc_now_iso()
+        module_code = preview_next_module_code(tested_at, DEFAULT_DB)
+        self.registry_next_var.set(module_code)
+        from .registry import build_rinv_text
+        self.registry_rinv_var.set(build_rinv_text(module_code, tested_at))
+
+    def _current_test_snapshot(self) -> tuple[bool, dict]:
+        s = self.diag.state
+        uart_errors = []
+        for row in s.mon_io:
+            if row.get("name") == "UART1":
+                uart_errors = [
+                    int(row.get("parity_errs", 0)),
+                    int(row.get("framing_errs", 0)),
+                    int(row.get("overrun_errs", 0)),
+                ]
+                break
+
+        checks = {
+            "serial_data": s.bytes_received > 0,
+            "nmea_valid": s.nmea_valid > 0 and s.nmea_invalid == 0,
+            "ubx_bidirectional": s.ubx_frames > 0,
+            "time_received": bool(s.utc_time),
+            "mon_hw_received": bool(s.mon_hw),
+            "antenna_ok": (s.mon_hw or {}).get("antenna_status") == "OK",
+            "mon_io_received": bool(s.mon_io),
+            "uart_errors_zero": bool(uart_errors) and sum(uart_errors) == 0,
+            "rxbuf_received": bool(s.mon_rxbuf),
+            "txbuf_received": bool(s.mon_txbuf),
+            "txbuf_no_errors": bool(s.mon_txbuf) and not any(
+                (
+                    s.mon_txbuf.get("limit_reached"),
+                    s.mon_txbuf.get("memory_allocation_error"),
+                    s.mon_txbuf.get("allocation_error"),
+                )
+            ),
+        }
+        passed = all(checks.values())
+        snapshot = {
+            "checks": checks,
+            "state": s.to_dict(),
+            "captured_at_utc": utc_now_iso(),
+        }
+        return passed, snapshot
+
+    def _provision_current_module(self) -> None:
+        if not self._ensure_connected():
+            return
+        if not db_status(DEFAULT_DB).get("exists"):
+            messagebox.showwarning(
+                "GPS Lab Registry",
+                "The physical SQLite database does not exist. Create it first.",
+            )
+            return
+        if self.diag.state.rinv_is_default_empty is not True:
+            messagebox.showwarning(
+                "GPS Lab Registry",
+                "Provisioning is allowed only when CFG-RINV is confirmed EMPTY / FACTORY DEFAULT.",
+            )
+            return
+
+        passed, snapshot = self._current_test_snapshot()
+        if not passed:
+            failed = [k for k, v in snapshot["checks"].items() if not v]
+            messagebox.showwarning(
+                "GPS Lab Registry",
+                "Mandatory diagnostic checks are not complete: " + ", ".join(failed),
+            )
+            return
+
+        tested_at = utc_now_iso()
+        from .registry import build_rinv_text
+        module_code = preview_next_module_code(tested_at, DEFAULT_DB)
+        rinv_text = build_rinv_text(module_code, tested_at)
+
+        if not messagebox.askyesno(
+            "GPS Lab Provisioning",
+            "Write this open technological marker to the receiver?\n\n"
+            f"{rinv_text}\n\n"
+            "It will later be saved to EEPROM. This is not a certificate or security identifier.",
+        ):
+            return
+
+        row = add_inspection(
+            payload=snapshot,
+            board="GY-GPS6MV2",
+            receiver=self.diag.state.receiver_identity or "u-blox 6",
+            sw_version=self.diag.state.ubx_sw_version,
+            hw_version=self.diag.state.ubx_hw_version,
+            result="PENDING",
+            tested_at_utc=tested_at,
+            rinv_before=self.diag.state.rinv_text or "EMPTY / FACTORY DEFAULT",
+            rinv_after=rinv_text,
+            db_path=DEFAULT_DB,
+        )
+        if row["module_code"] != module_code:
+            messagebox.showerror("GPS Lab Registry", "Module number allocation changed unexpectedly.")
+            return
+
+        self.registry_state_var.set("WRITING RINV TO RAM")
+        self.registry_next_var.set(module_code)
+        self.registry_rinv_var.set(rinv_text)
+        self.worker.send(build_cfg_rinv_write(rinv_text.encode("ascii"), binary=False))
+        self.after(400, lambda: self.worker.send(CFG_RINV_POLL))
+        self.after(1200, lambda: self._finish_rinv_write(module_code, rinv_text, snapshot))
+
+    def _finish_rinv_write(self, module_code: str, rinv_text: str, snapshot: dict) -> None:
+        if self.diag.state.rinv_text != rinv_text:
+            self.registry_state_var.set("RINV READ-BACK FAILED")
+            self.registry_last_var.set(
+                f"Expected {rinv_text!r}, got {self.diag.state.rinv_text!r}"
+            )
+            update_inspection(
+                module_code,
+                result="WRITE_VERIFY_FAILED",
+                payload=snapshot | {"write_readback": False},
+                db_path=DEFAULT_DB,
+            )
+            return
+
+        self.registry_state_var.set("RINV READ-BACK PASS | SAVING TO EEPROM")
+        self.worker.send(build_cfg_cfg_save_rinv())
+        snapshot = snapshot | {
+            "write_readback": True,
+            "rinv_written": rinv_text,
+            "eeprom_save_sent_at_utc": utc_now_iso(),
+        }
+        update_inspection(
+            module_code,
+            result="PENDING_POWER_CYCLE",
+            rinv_after=rinv_text,
+            payload=snapshot,
+            db_path=DEFAULT_DB,
+        )
+        self.registry_last_var.set(
+            "RINV RAM verify PASS; EEPROM save command sent. Power-cycle the module, reconnect, then Verify after power cycle."
+        )
+        self._refresh_registry_status()
+
+    def _verify_persisted_module(self) -> None:
+        if not self._ensure_connected():
+            return
+        self.worker.send(CFG_RINV_POLL)
+        self.registry_state_var.set("READING RINV FOR PERSISTENCE VERIFY")
+        self.after(700, self._finish_persistence_verify)
+
+    def _finish_persistence_verify(self) -> None:
+        rinv_text = self.diag.state.rinv_text
+        if not rinv_text:
+            self.registry_state_var.set("VERIFY FAILED")
+            self.registry_last_var.set("No readable CFG-RINV text.")
+            return
+        row = find_inspection_by_rinv(rinv_text, DEFAULT_DB)
+        if row is None:
+            self.registry_state_var.set("NOT IN LOCAL DATABASE")
+            self.registry_last_var.set(f"RINV present but not found locally: {rinv_text}")
+            return
+
+        payload = row.get("payload", {})
+        payload["power_cycle_verified"] = True
+        payload["power_cycle_verified_at_utc"] = utc_now_iso()
+        update_inspection(
+            row["module_code"],
+            result="PASS",
+            rinv_after=rinv_text,
+            payload=payload,
+            db_path=DEFAULT_DB,
+        )
+        self.registry_state_var.set("PASS | EEPROM PERSISTENCE VERIFIED")
+        self.registry_last_var.set(
+            f"{row['module_code']} verified after power cycle and recorded PASS."
+        )
+        self._refresh_registry_status()
 
     def _poll_engineering_all(self) -> None:
         if not self._ensure_connected():
