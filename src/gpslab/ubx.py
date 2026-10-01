@@ -38,6 +38,7 @@ def build_packet(msg_class: int, msg_id: int, payload: bytes = b"") -> bytes:
 MON_VER_POLL = build_packet(0x0A, 0x04)
 CFG_USB_POLL = build_packet(0x06, 0x1B)
 SEC_UNIQID_POLL = build_packet(0x27, 0x03)
+NAV_TIMEUTC_POLL = build_packet(0x01, 0x21)
 
 
 def packet_is_valid(packet: bytes) -> bool:
@@ -151,11 +152,35 @@ def parse_sec_uniqid(payload: bytes) -> dict:
     }
 
 
+def parse_nav_timeutc(payload: bytes) -> dict:
+    """Parse UBX-NAV-TIMEUTC UTC solution and validity flags."""
+    if len(payload) < 20:
+        return {}
+
+    valid = payload[19]
+    return {
+        "itow_ms": int.from_bytes(payload[0:4], "little"),
+        "time_accuracy_ns": int.from_bytes(payload[4:8], "little"),
+        "nano_ns": int.from_bytes(payload[8:12], "little", signed=True),
+        "year": int.from_bytes(payload[12:14], "little"),
+        "month": payload[14],
+        "day": payload[15],
+        "hour": payload[16],
+        "minute": payload[17],
+        "second": payload[18],
+        "valid_flags": valid,
+        "valid_tow": bool(valid & 0x01),
+        "valid_week": bool(valid & 0x02),
+        "valid_utc": bool(valid & 0x04),
+    }
+
+
 def frame_name(msg_class: int, msg_id: int) -> str:
     names = {
         (0x0A, 0x04): "MON-VER",
         (0x06, 0x1B): "CFG-USB",
         (0x27, 0x03): "SEC-UNIQID",
+        (0x01, 0x21): "NAV-TIMEUTC",
         (0x05, 0x00): "ACK-NAK",
         (0x05, 0x01): "ACK-ACK",
     }
