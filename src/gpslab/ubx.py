@@ -37,6 +37,7 @@ def build_packet(msg_class: int, msg_id: int, payload: bytes = b"") -> bytes:
 
 MON_VER_POLL = build_packet(0x0A, 0x04)
 CFG_USB_POLL = build_packet(0x06, 0x1B)
+CFG_RINV_POLL = build_packet(0x06, 0x34)
 SEC_UNIQID_POLL = build_packet(0x27, 0x03)
 NAV_TIMEUTC_POLL = build_packet(0x01, 0x21)
 MON_HW_POLL = build_packet(0x0A, 0x09)
@@ -126,6 +127,38 @@ def parse_mon_ver(payload: bytes) -> dict:
 def _cstring(data: bytes) -> str | None:
     value = data.split(b"\x00", 1)[0].decode("ascii", "replace").strip()
     return value or None
+
+
+def parse_cfg_rinv(payload: bytes) -> dict:
+    """Parse UBX-CFG-RINV remote inventory contents (u-blox 6)."""
+    if len(payload) < 1:
+        return {}
+
+    flags = payload[0]
+    data = bytes(payload[1:31])
+    binary = bool(flags & 0x02)
+    dump = bool(flags & 0x01)
+    text = None
+    if not binary:
+        text = data.decode("ascii", "replace").rstrip("\x00")
+
+    default_text = "Notice: no data saved!"
+    is_default_empty = (
+        flags == 0
+        and text is not None
+        and text.rstrip("\x00") == default_text
+    )
+
+    return {
+        "flags": flags,
+        "dump": dump,
+        "binary": binary,
+        "data": data,
+        "length": len(data),
+        "text": text,
+        "hex": data.hex(" ").upper(),
+        "is_default_empty": is_default_empty,
+    }
 
 
 def parse_cfg_usb(payload: bytes) -> dict:
@@ -344,6 +377,7 @@ def frame_name(msg_class: int, msg_id: int) -> str:
     names = {
         (0x0A, 0x04): "MON-VER",
         (0x06, 0x1B): "CFG-USB",
+        (0x06, 0x34): "CFG-RINV",
         (0x27, 0x03): "SEC-UNIQID",
         (0x01, 0x21): "NAV-TIMEUTC",
         (0x0A, 0x09): "MON-HW",
