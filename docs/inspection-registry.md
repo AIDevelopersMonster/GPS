@@ -85,3 +85,93 @@ UPDATE SQLite record with final RINV/persistence result
 
 No cryptography is involved. The purpose is traceability for our own engineering
 workflow.
+
+
+## Registry management and reports
+
+The SQLite database is the primary record:
+
+```text
+C:\Users\<USER>\.gpslab\gpslab.sqlite3
+```
+
+The GUI v0.6 includes a **Registry / Provisioning** manager with:
+
+- physical database status and record count;
+- module substring filter;
+- result filter;
+- table of stored inspections;
+- record detail viewer including diagnostic JSON;
+- summary counts;
+- CSV export for Excel or further analysis;
+- HTML report for the full registry or a selected module;
+- SQLite backup using the SQLite online backup API;
+- JSON export.
+
+### CLI examples
+
+Database status:
+
+```powershell
+py -m gpslab.registry_cli status
+```
+
+Summary:
+
+```powershell
+py -m gpslab.registry_cli summary
+```
+
+Find PASS records:
+
+```powershell
+py -m gpslab.registry_cli find --result PASS --limit 100
+```
+
+Find a module by partial number:
+
+```powershell
+py -m gpslab.registry_cli find --module 00001
+```
+
+Show one complete record, including its diagnostic payload:
+
+```powershell
+py -m gpslab.registry_cli show GPS6-2026-00001
+```
+
+Export all records to CSV:
+
+```powershell
+py -m gpslab.registry_cli export-csv .\gpslab.csv
+```
+
+Generate a complete HTML report:
+
+```powershell
+py -m gpslab.registry_cli report .\gpslab-report.html
+```
+
+Generate an HTML report for one module:
+
+```powershell
+py -m gpslab.registry_cli report .\GPS6-2026-00001.html --module-code GPS6-2026-00001
+```
+
+Create a consistent database backup:
+
+```powershell
+py -m gpslab.registry_cli backup .\backup\gpslab-20261001.sqlite3
+```
+
+Existing JSON export remains available:
+
+```powershell
+py -m gpslab.registry_cli export-json .\gpslab-export.json
+```
+
+### Data retention
+
+The SQLite file is the source of truth. CSV, JSON and HTML files are exports and
+may be recreated at any time. Back up the SQLite file itself regularly if the
+registry becomes operationally important.
