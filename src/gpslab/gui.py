@@ -12,6 +12,10 @@ from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_
 from .timecheck import utc_delta_seconds
 from .ubx import (
     CFG_USB_POLL,
+    MON_HW_POLL,
+    MON_IO_POLL,
+    MON_RXBUF_POLL,
+    MON_TXBUF_POLL,
     MON_VER_POLL,
     NAV_TIMEUTC_POLL,
     SEC_UNIQID_POLL,
@@ -62,7 +66,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.3.2")
+        self.title("GPS Lab Diagnostic Console v0.4")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -172,6 +176,7 @@ class GPSGui(tk.Tk):
 
         overview = ttk.Frame(notebook, padding=12)
         identity = ttk.Frame(notebook, padding=12)
+        engineering = ttk.Frame(notebook, padding=8)
         ubx_terminal = ttk.Frame(notebook, padding=8)
         nmea = ttk.Frame(notebook, padding=6)
         raw = ttk.Frame(notebook, padding=6)
@@ -179,6 +184,7 @@ class GPSGui(tk.Tk):
         notebook.add(overview, text="Overview")
         notebook.add(identity, text="Identity / Time")
         notebook.add(nmea, text="NMEA Decoder")
+        notebook.add(engineering, text="Engineering")
         notebook.add(ubx_terminal, text="UBX Terminal")
         notebook.add(raw, text="Raw Stream")
 
@@ -309,6 +315,121 @@ class GPSGui(tk.Tk):
                 wraplength=760,
                 justify="left",
             ).grid(row=row, column=1, sticky="w", padx=(12, 0), pady=3)
+
+        eng_controls = ttk.LabelFrame(
+            engineering, text="Read-only u-blox monitor polls", padding=10
+        )
+        eng_controls.pack(fill="x", pady=(0, 8))
+
+        poll_specs = [
+            ("MON-HW", MON_HW_POLL, "RF/hardware state: noise, AGC, antenna and jamming indicators."),
+            ("MON-IO", MON_IO_POLL, "I/O counters and serial-port errors."),
+            ("MON-RXBUF", MON_RXBUF_POLL, "Receive-buffer load by target."),
+            ("MON-TXBUF", MON_TXBUF_POLL, "Transmit-buffer load and allocation errors."),
+        ]
+        for col, (caption, packet, help_text) in enumerate(poll_specs):
+            ttk.Button(
+                eng_controls,
+                text=caption,
+                command=lambda p=packet: self._send_named(p),
+                width=14,
+            ).grid(row=0, column=col, padx=(0, 6), pady=2, sticky="w")
+            ttk.Label(
+                eng_controls,
+                text=help_text,
+                wraplength=225,
+                justify="left",
+            ).grid(row=1, column=col, padx=(0, 6), sticky="nw")
+
+        ttk.Button(
+            eng_controls,
+            text="Poll All",
+            command=self._poll_engineering_all,
+            width=14,
+        ).grid(row=2, column=0, pady=(8, 0), sticky="w")
+
+        self.eng_hw_vars = {
+            "Payload bytes": tk.StringVar(value="-"),
+            "Noise / ms": tk.StringVar(value="-"),
+            "AGC count": tk.StringVar(value="-"),
+            "Antenna status": tk.StringVar(value="-"),
+            "Antenna power": tk.StringVar(value="-"),
+            "Jamming indicator": tk.StringVar(value="-"),
+            "Jamming state": tk.StringVar(value="-"),
+            "RTC calibrated": tk.StringVar(value="-"),
+            "Safe boot": tk.StringVar(value="-"),
+        }
+
+        hw_box = ttk.LabelFrame(engineering, text="MON-HW / RF and hardware", padding=10)
+        hw_box.pack(fill="x", pady=(0, 8))
+        for row, (label, var) in enumerate(self.eng_hw_vars.items()):
+            ttk.Label(hw_box, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 14), pady=2
+            )
+            ttk.Label(
+                hw_box, textvariable=var, font=("TkDefaultFont", 10, "bold")
+            ).grid(row=row, column=1, sticky="w", pady=2)
+
+        ttk.Label(
+            hw_box,
+            text=(
+                "Jamming values are receiver diagnostic indicators. They can show RF "
+                "interference conditions but do not by themselves identify a source or prove spoofing."
+            ),
+            wraplength=940,
+            justify="left",
+        ).grid(row=len(self.eng_hw_vars), column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        io_box = ttk.LabelFrame(engineering, text="MON-IO / ports", padding=6)
+        io_box.pack(fill="both", expand=True, pady=(0, 8))
+        self.eng_io_tree = ttk.Treeview(
+            io_box,
+            columns=("port", "rx", "tx", "parity", "framing", "overrun", "rx_busy", "tx_busy"),
+            show="headings",
+            height=6,
+        )
+        for key, title, width in (
+            ("port", "Port", 110),
+            ("rx", "RX bytes", 100),
+            ("tx", "TX bytes", 100),
+            ("parity", "Parity", 80),
+            ("framing", "Framing", 80),
+            ("overrun", "Overrun", 80),
+            ("rx_busy", "RX busy", 80),
+            ("tx_busy", "TX busy", 80),
+        ):
+            self.eng_io_tree.heading(key, text=title)
+            self.eng_io_tree.column(key, width=width, anchor="center")
+        self.eng_io_tree.pack(fill="x")
+
+        buffers = ttk.Frame(engineering)
+        buffers.pack(fill="both", expand=True)
+        rx_box = ttk.LabelFrame(buffers, text="MON-RXBUF", padding=6)
+        tx_box = ttk.LabelFrame(buffers, text="MON-TXBUF", padding=6)
+        rx_box.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        tx_box.pack(side="left", fill="both", expand=True, padx=(4, 0))
+
+        self.eng_rx_tree = ttk.Treeview(
+            rx_box, columns=("target", "pending", "usage", "peak"), show="headings", height=6
+        )
+        self.eng_tx_tree = ttk.Treeview(
+            tx_box, columns=("target", "pending", "usage", "peak"), show="headings", height=6
+        )
+        for tree in (self.eng_rx_tree, self.eng_tx_tree):
+            for key, title, width in (
+                ("target", "Target", 110),
+                ("pending", "Pending", 90),
+                ("usage", "Usage %", 90),
+                ("peak", "Peak %", 90),
+            ):
+                tree.heading(key, text=title)
+                tree.column(key, width=width, anchor="center")
+            tree.pack(fill="both", expand=True)
+
+        self.eng_tx_status_var = tk.StringVar(value="TX buffer status: -")
+        ttk.Label(
+            tx_box, textvariable=self.eng_tx_status_var, font=("TkDefaultFont", 9, "bold")
+        ).pack(anchor="w", pady=(6, 0))
 
         self.nmea_notebook = ttk.Notebook(nmea)
         self.nmea_notebook.pack(fill="both", expand=True)
@@ -512,6 +633,75 @@ class GPSGui(tk.Tk):
         )
         self.after(1500, self._mark_identity_no_response)
 
+    def _poll_engineering_all(self) -> None:
+        if not self._ensure_connected():
+            return
+        for packet in (MON_HW_POLL, MON_IO_POLL, MON_RXBUF_POLL, MON_TXBUF_POLL):
+            self.worker.send(packet)
+
+    def _refresh_engineering(self) -> None:
+        s = self.diag.state
+
+        hw = s.mon_hw or {}
+        if hw:
+            self.eng_hw_vars["Payload bytes"].set(str(hw.get("payload_length", "-")))
+            self.eng_hw_vars["Noise / ms"].set(str(hw.get("noise_per_ms", "-")))
+            self.eng_hw_vars["AGC count"].set(str(hw.get("agc_cnt", "-")))
+            self.eng_hw_vars["Antenna status"].set(str(hw.get("antenna_status", "-")))
+            self.eng_hw_vars["Antenna power"].set(str(hw.get("antenna_power", "-")))
+            jam_ind = hw.get("jam_ind")
+            self.eng_hw_vars["Jamming indicator"].set("-" if jam_ind is None else str(jam_ind))
+            self.eng_hw_vars["Jamming state"].set(str(hw.get("jamming_state_name", "-")))
+            self.eng_hw_vars["RTC calibrated"].set(str(hw.get("rtc_calib", "-")))
+            self.eng_hw_vars["Safe boot"].set(str(hw.get("safe_boot", "-")))
+
+        for item in self.eng_io_tree.get_children():
+            self.eng_io_tree.delete(item)
+        for row in s.mon_io:
+            self.eng_io_tree.insert(
+                "",
+                "end",
+                values=(
+                    row.get("name", row.get("port", "-")),
+                    row.get("rx_bytes", "-"),
+                    row.get("tx_bytes", "-"),
+                    row.get("parity_errs", "-"),
+                    row.get("framing_errs", "-"),
+                    row.get("overrun_errs", "-"),
+                    row.get("rx_busy", "-"),
+                    row.get("tx_busy", "-"),
+                ),
+            )
+
+        for tree, rows in (
+            (self.eng_rx_tree, s.mon_rxbuf),
+            (self.eng_tx_tree, (s.mon_txbuf or {}).get("targets", [])),
+        ):
+            for item in tree.get_children():
+                tree.delete(item)
+            for row in rows:
+                tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        row.get("name", row.get("target", "-")),
+                        row.get("pending", "-"),
+                        row.get("usage", "-"),
+                        row.get("peak_usage", "-"),
+                    ),
+                )
+
+        tx = s.mon_txbuf or {}
+        if tx:
+            self.eng_tx_status_var.set(
+                "TX buffer status: total="
+                f"{tx.get('total_usage', '-')}% "
+                f"peak={tx.get('total_peak_usage', '-')}% | "
+                f"limit={tx.get('limit_reached', '-')} "
+                f"mem_err={tx.get('memory_allocation_error', '-')} "
+                f"alloc_err={tx.get('allocation_error', '-')}"
+            )
+
     def send_terminal_packet(self) -> None:
         if not self._ensure_connected():
             return
@@ -647,6 +837,7 @@ class GPSGui(tk.Tk):
             self._append_ubx("RX", data)
         self._append_raw(data)
         self._refresh_nmea_views()
+        self._refresh_engineering()
         self._refresh_status()
 
     def _append_ubx(self, direction: str, data: bytes) -> None:
