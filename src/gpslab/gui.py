@@ -81,7 +81,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.5")
+        self.title("GPS Lab Diagnostic Console v0.5.1")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -99,6 +99,7 @@ class GPSGui(tk.Tk):
         self.receiver_var = tk.StringVar(value="-")
         self.sw_var = tk.StringVar(value="-")
         self.hw_var = tk.StringVar(value="-")
+        self.mon_ver_status_var = tk.StringVar(value="NOT REQUESTED")
         self.protver_var = tk.StringVar(value="-")
         self.serial_var = tk.StringVar(value="-")
         self.unique_var = tk.StringVar(value="-")
@@ -258,6 +259,7 @@ class GPSGui(tk.Tk):
             ("Receiver", self.receiver_var),
             ("SW version", self.sw_var),
             ("HW version", self.hw_var),
+            ("MON-VER status", self.mon_ver_status_var),
             ("Protocol version", self.protver_var),
             ("USB serial descriptor", self.serial_var),
             ("Unique chip ID", self.unique_var),
@@ -714,7 +716,26 @@ class GPSGui(tk.Tk):
             self.unique_var.set("not returned / unsupported by this receiver")
 
     def _poll_mon_ver(self) -> None:
-        self._send_named(MON_VER_POLL)
+        if not self._ensure_connected():
+            return
+        self.mon_ver_status_var.set("REQUESTED")
+        self.worker.send(MON_VER_POLL)
+        self.after(450, lambda: self._request_mon_ver_retry(1))
+
+    def _request_mon_ver_retry(self, attempt: int) -> None:
+        if not self.worker or not self.worker.is_alive():
+            return
+        s = self.diag.state
+        if s.ubx_sw_version or s.ubx_hw_version:
+            self.mon_ver_status_var.set("RECEIVED")
+            return
+        if attempt >= 3:
+            self.mon_ver_status_var.set("NO RESPONSE")
+            return
+        self.mon_ver_status_var.set(f"REQUESTED {attempt + 1}/3")
+        self.worker.send(MON_VER_POLL)
+        delay = (350, 550, 800)[attempt]
+        self.after(delay, lambda a=attempt + 1: self._request_mon_ver_retry(a))
 
     def _poll_cfg_usb(self) -> None:
         if not self._ensure_connected():
@@ -744,14 +765,23 @@ class GPSGui(tk.Tk):
     def identify_all(self) -> None:
         if not self._ensure_connected():
             return
+
+        # Stagger requests. Five back-to-back polls on a 9600-baud receiver
+        # compete with the continuous NMEA stream and can make an old u-blox 6
+        # response easy to miss. MON-VER is intentionally first.
+        self.mon_ver_status_var.set("REQUESTED")
         self.serial_var.set("polling...")
         self.unique_var.set("polling...")
-        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL, NAV_TIMEUTC_POLL, CFG_RINV_POLL):
-            self.worker.send(packet)
+        self.worker.send(MON_VER_POLL)
+        self.after(180, lambda: self.worker and self.worker.send(NAV_TIMEUTC_POLL))
+        self.after(360, lambda: self.worker and self.worker.send(CFG_RINV_POLL))
+        self.after(650, lambda: self.worker and self.worker.send(CFG_USB_POLL))
+        self.after(1050, lambda: self.worker and self.worker.send(SEC_UNIQID_POLL))
+        self.after(450, lambda: self._request_mon_ver_retry(1))
         self.connection_var.set(
-            self.connection_var.get() + " | identity polls sent"
+            self.connection_var.get() + " | identity sequence sent"
         )
-        self.after(1500, self._mark_identity_no_response)
+        self.after(1800, self._mark_identity_no_response)
 
     def _refresh_registry_status(self) -> None:
         status = db_status(DEFAULT_DB)
@@ -1144,6 +1174,11 @@ class GPSGui(tk.Tk):
                         f"CONNECTED: {self.diag.state.port} @ "
                         f"{self.diag.state.baud}"
                     )
+                    # u-blox 6 can be busy streaming NMEA at 9600 baud.
+                    # Ask MON-VER by itself first and retry briefly instead of
+                    # flooding the port with several UBX polls at once.
+                    self.mon_ver_status_var.set("AUTO REQUEST")
+                    self.after(80, lambda: self._request_mon_ver_retry(0))
                 elif kind == "disconnected":
                     self.connection_var.set("DISCONNECTED")
                 elif kind == "error":
@@ -1280,6 +1315,8 @@ class GPSGui(tk.Tk):
         self.receiver_var.set(value(s.receiver_identity))
         self.sw_var.set(value(s.ubx_sw_version))
         self.hw_var.set(value(s.ubx_hw_version))
+        if s.ubx_sw_version or s.ubx_hw_version:
+            self.mon_ver_status_var.set("RECEIVED")
         self.protver_var.set(value(s.protocol_version))
         self.serial_var.set(value(s.usb_serial_number))
         self.unique_var.set(value(s.unique_id))
