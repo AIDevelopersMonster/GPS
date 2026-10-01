@@ -164,3 +164,60 @@ https://github.com/espruino/EspruinoDocs/blob/master/info/Bangle.js2%20Technical
 ## Non-claims
 
 Current evidence does not yet prove the exact silicon part number or manufacturer of the complete breakout board. Those require direct identification of the specific sample.
+
+
+## Using GPS Lab PCAS Terminal
+
+GPS Lab v0.7 contains an integrated **PCAS Terminal**. You do not need to close
+the GUI or open PowerShell just to send PCAS commands.
+
+Workflow:
+
+1. Select the current COM port and baud rate in the main GPS Lab window.
+2. Click **Connect**.
+3. Open the **PCAS Terminal** tab.
+4. Either type a command and press **Send**, or use a quick-command button.
+5. GPS Lab appends CR/LF automatically.
+
+You may enter a full command:
+
+```text
+$PCAS06,0*1B
+```
+
+or only the payload:
+
+```text
+PCAS06,0
+```
+
+If the checksum is omitted, GPS Lab calculates it automatically. If a checksum
+is supplied, GPS Lab validates it before transmission.
+
+Quick buttons are provided for:
+
+- Firmware query;
+- Hardware query;
+- Save configuration;
+- 4800 / 9600 / 19200 / 38400 / 57600 / 115200 baud.
+
+When a baud-rate button is used, GPS Lab sends the corresponding PCAS01 command,
+disconnects its serial worker, changes the GUI baud setting and reconnects at the
+new speed automatically.
+
+Example: changing 115200 to 9600 requires only:
+
+```text
+Connect at 115200
+-> PCAS Terminal
+-> click 9600
+-> confirm
+-> GPS Lab reconnects at 9600
+-> verify NMEA/time
+-> click Save config
+-> power-cycle and verify again
+```
+
+The terminal display normally focuses on PCAS/GPTXT replies. Enable
+**Show all ASCII RX** to mirror the complete ASCII/NMEA stream into the PCAS
+terminal.
