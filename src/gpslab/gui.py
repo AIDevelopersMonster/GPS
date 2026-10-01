@@ -4,6 +4,7 @@ import queue
 import threading
 import tkinter as tk
 from datetime import datetime, timezone
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .diagnostics import GPSDiagnostics
