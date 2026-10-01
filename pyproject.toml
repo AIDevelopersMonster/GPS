@@ -10,11 +10,13 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "pyserial>=3.5",
+  "cryptography>=43.0",
 ]
 
 [project.scripts]
 gps-cli = "gpslab.cli:main"
 gps-gui = "gpslab.gui:main"
+gps-cert = "gpslab.certcli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
