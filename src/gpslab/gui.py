@@ -11,6 +11,7 @@ from .diagnostics import GPSDiagnostics
 from .nmea import explain_sentence, parse_sentence
 from .registry import (
     DEFAULT_DB,
+    add_factory_inspection,
     add_inspection,
     db_status,
     ensure_db,
@@ -153,6 +154,7 @@ class GPSGui(tk.Tk):
         self.registry_filter_var = tk.StringVar()
         self.registry_result_filter_var = tk.StringVar(value="ALL")
         self.registry_summary_var = tk.StringVar(value="-")
+        self.pcas_registry_status_var = tk.StringVar(value="Not recorded")
 
         self._build_ui()
         self.refresh_ports()
@@ -567,6 +569,39 @@ class GPSGui(tk.Tk):
             justify="left",
         ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
+        pcas_reg_box = ttk.LabelFrame(
+            registry, text="Factory-ID record (PCAS / URANUS5)", padding=10
+        )
+        pcas_reg_box.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            pcas_reg_box,
+            text=(
+                "For PCAS receivers we do not invent or write our own ID. "
+                "If GNSS time has been received and the receiver reports a factory serial, "
+                "GPS Lab records that factory serial in the database. If no factory serial is returned, nothing is added."
+            ),
+            wraplength=920,
+            justify="left",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(pcas_reg_box, text="Detected factory ID:").grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=3
+        )
+        ttk.Label(
+            pcas_reg_box,
+            textvariable=self.pcas_receiver_id_var,
+            font=("TkDefaultFont", 10, "bold"),
+        ).grid(row=1, column=1, sticky="w", pady=3)
+        ttk.Label(
+            pcas_reg_box,
+            textvariable=self.pcas_registry_status_var,
+            font=("TkDefaultFont", 9, "bold"),
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Button(
+            pcas_reg_box,
+            text="Record factory ID + GNSS time",
+            command=self._record_pcas_factory_id,
+        ).grid(row=1, column=2, sticky="e", padx=(12, 0))
+
         manager_box = ttk.LabelFrame(registry, text="Registry manager", padding=10)
         manager_box.pack(fill="both", expand=True)
 
@@ -591,13 +626,14 @@ class GPSGui(tk.Tk):
 
         self.registry_tree = ttk.Treeview(
             manager_box,
-            columns=("id", "module", "utc", "result", "profile", "receiver"),
+            columns=("id", "module", "factory", "utc", "result", "profile", "receiver"),
             show="headings",
             height=7,
         )
         for key, title, width in (
             ("id", "ID", 55),
-            ("module", "Module", 170),
+            ("module", "Record / Module", 170),
+            ("factory", "Factory ID", 155),
             ("utc", "Tested UTC", 175),
             ("result", "Result", 170),
             ("profile", "Profile", 130),
@@ -971,6 +1007,73 @@ class GPSGui(tk.Tk):
         )
         self.after(1800, self._mark_identity_no_response)
 
+    def _record_pcas_factory_id(self) -> None:
+        if not self._ensure_connected():
+            return
+
+        factory_id = self.pcas_receiver_id_var.get().strip()
+        if not factory_id or factory_id == "-":
+            self.pcas_registry_status_var.set("No factory ID received - nothing recorded")
+            messagebox.showinfo(
+                "GPS Lab Registry",
+                "No factory serial has been received. Nothing will be written to the database.",
+            )
+            return
+
+        if not self.diag.state.utc_time:
+            self.pcas_registry_status_var.set("Waiting for GNSS time - nothing recorded")
+            messagebox.showinfo(
+                "GPS Lab Registry",
+                "GNSS/NMEA time has not been received yet. Nothing will be written to the database.",
+            )
+            return
+
+        if not db_status(DEFAULT_DB).get("exists"):
+            ensure_db(DEFAULT_DB)
+
+        tested_at = utc_now_iso()
+        snapshot = {
+            "profile_policy": "FACTORY_ID_AND_GNSS_TIME",
+            "factory_id": factory_id,
+            "identity_source": "PCAS06,1",
+            "pcas_receiver": self.pcas_receiver_var.get(),
+            "pcas_hardware": self.pcas_hardware_var.get(),
+            "pcas_firmware": self.pcas_firmware_var.get(),
+            "pcas_antenna": self.pcas_antenna_var.get(),
+            "gnss_time": self.diag.state.utc_time,
+            "gnss_date": self.diag.state.utc_date,
+            "state": self.diag.state.to_dict(),
+            "captured_at_utc": tested_at,
+        }
+
+        row = add_factory_inspection(
+            factory_id=factory_id,
+            payload=snapshot,
+            board="GY-GPS6MV2",
+            receiver=self.pcas_receiver_var.get()
+            if self.pcas_receiver_var.get() != "-"
+            else "PCAS receiver",
+            sw_version=self.pcas_firmware_var.get()
+            if self.pcas_firmware_var.get() != "-"
+            else None,
+            hw_version=self.pcas_hardware_var.get()
+            if self.pcas_hardware_var.get() != "-"
+            else None,
+            result="PASS",
+            profile="PCAS-TIME-01",
+            tested_at_utc=tested_at,
+            db_path=DEFAULT_DB,
+        )
+
+        action = "created" if row.get("created") else "updated"
+        self.pcas_registry_status_var.set(
+            f"{action.upper()}: factory ID {factory_id} | GNSS time received"
+        )
+        self.registry_last_var.set(
+            f"PCAS factory record {action}: {factory_id}"
+        )
+        self._refresh_registry_status()
+
     def _refresh_registry_table(self) -> None:
         if not hasattr(self, "registry_tree"):
             return
@@ -991,6 +1094,7 @@ class GPSGui(tk.Tk):
                 values=(
                     row.get("id"),
                     row.get("module_code"),
+                    row.get("factory_id"),
                     row.get("tested_at_utc"),
                     row.get("result"),
                     row.get("profile"),
@@ -1473,6 +1577,14 @@ class GPSGui(tk.Tk):
                 )
             if receiver_id:
                 self.pcas_receiver_id_var.set(receiver_id)
+                if self.diag.state.utc_time:
+                    self.pcas_registry_status_var.set(
+                        "Factory ID + GNSS time available for database record"
+                    )
+                else:
+                    self.pcas_registry_status_var.set(
+                        "Factory ID received; waiting for GNSS time"
+                    )
             self.pcas_status_var.set("Hardware identified")
 
         if "ANTENNA " in body:
@@ -1862,7 +1974,13 @@ class GPSGui(tk.Tk):
 
         if not s.utc_time:
             self.time_status_var.set("WAITING")
+            if self.pcas_receiver_id_var.get() not in ("", "-"):
+                self.pcas_registry_status_var.set("Factory ID received; waiting for GNSS time")
         elif s.ubx_utc_valid is True:
+            if self.pcas_receiver_id_var.get() not in ("", "-"):
+                self.pcas_registry_status_var.set(
+                    "Factory ID + GNSS time available for database record"
+                )
             if delta is not None and abs(delta) <= 10.0:
                 self.time_status_var.set("TIME RECEIVED | UBX VALID | HOST MATCH")
             elif delta is not None:
@@ -1871,6 +1989,10 @@ class GPSGui(tk.Tk):
                 self.time_status_var.set("TIME RECEIVED | UBX VALID")
         else:
             self.time_status_var.set("TIME RECEIVED")
+            if self.pcas_receiver_id_var.get() not in ("", "-"):
+                self.pcas_registry_status_var.set(
+                    "Factory ID + GNSS time available for database record"
+                )
 
         self.rate_var.set(
             "-" if s.gga_rate_hz is None else f"{s.gga_rate_hz:.2f} Hz"
