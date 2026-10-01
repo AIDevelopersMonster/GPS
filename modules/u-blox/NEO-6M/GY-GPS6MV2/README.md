@@ -82,10 +82,11 @@ documentation describes the device at 8-bit I2C address `0xA0` (7-bit address
 that startup session. External masters must therefore not be attached casually
 to the live DDC bus.
 
-Typical GY-GPS6MV2 boards are sold with a 24C32-class EEPROM and backup battery.
-For this exact laboratory sample, the presence of an auxiliary 8-pin device is
-consistent with that design, but its package marking has not yet been recorded,
-so the exact EEPROM manufacturer/part number remains **TBD**.
+The photographed laboratory sample contains an 8-pin serial memory device
+with the clearly readable top marking `24C32`. This confirms a 24C32-class
+32-kbit (4096-byte) I2C serial EEPROM on this GY-GPS6MV2 board. The second
+marking line is not sufficiently legible in the current photograph to assign a
+manufacturer-specific part number, so the exact vendor remains **TBD**.
 
 ### EEPROM purpose
 
