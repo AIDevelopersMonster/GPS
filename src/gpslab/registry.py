@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DB_SCHEMA_VERSION = 1
+DB_SCHEMA_VERSION = 2
 DEFAULT_DB = Path.home() / ".gpslab" / "gpslab.sqlite3"
 
 
@@ -54,6 +54,8 @@ def ensure_db(path: Path = DEFAULT_DB) -> Path:
             CREATE TABLE IF NOT EXISTS inspections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 module_code TEXT NOT NULL UNIQUE,
+                factory_id TEXT,
+                identity_source TEXT,
                 tested_at_utc TEXT NOT NULL,
                 board TEXT,
                 receiver TEXT,
@@ -68,8 +70,17 @@ def ensure_db(path: Path = DEFAULT_DB) -> Path:
             )
             """
         )
+        columns = {
+            row[1] for row in con.execute("PRAGMA table_info(inspections)").fetchall()
+        }
+        if "factory_id" not in columns:
+            con.execute("ALTER TABLE inspections ADD COLUMN factory_id TEXT")
+        if "identity_source" not in columns:
+            con.execute("ALTER TABLE inspections ADD COLUMN identity_source TEXT")
+
         con.execute("CREATE INDEX IF NOT EXISTS idx_inspections_tested_at ON inspections(tested_at_utc)")
-        con.execute("PRAGMA user_version = 1")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_inspections_factory_id ON inspections(factory_id)")
+        con.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
     return path
 
 
@@ -173,6 +184,116 @@ def add_inspection(
     }
 
 
+def add_factory_inspection(
+    *,
+    factory_id: str,
+    payload: dict[str, Any],
+    board: str,
+    receiver: str,
+    sw_version: str | None,
+    hw_version: str | None,
+    result: str = "PASS",
+    profile: str = "PCAS-TIME-01",
+    identity_source: str = "PCAS06,1",
+    tested_at_utc: str | None = None,
+    db_path: Path = DEFAULT_DB,
+) -> dict[str, Any]:
+    """Insert/update a factory-identified receiver without inventing a local module ID.
+
+    The factory identifier itself is used as module_code so the registry remains
+    simple and human-readable. If the same factory ID is seen again, the existing
+    row is refreshed instead of creating duplicates.
+    """
+    factory_id = factory_id.strip()
+    if not factory_id:
+        raise ValueError("factory_id must not be empty")
+
+    tested_at_utc = tested_at_utc or utc_now_iso()
+    db_path = ensure_db(db_path)
+    payload_json = json.dumps(
+        _json_ready(payload), ensure_ascii=False, sort_keys=True
+    )
+    created_at = utc_now_iso()
+
+    with sqlite3.connect(db_path) as con:
+        existing = con.execute(
+            """
+            SELECT id, module_code
+            FROM inspections
+            WHERE factory_id=? OR module_code=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (factory_id, factory_id),
+        ).fetchone()
+
+        if existing:
+            inspection_id = int(existing[0])
+            module_code = str(existing[1])
+            con.execute(
+                """
+                UPDATE inspections
+                SET factory_id=?, identity_source=?, tested_at_utc=?, board=?,
+                    receiver=?, sw_version=?, hw_version=?, result=?, profile=?,
+                    payload_json=?
+                WHERE id=?
+                """,
+                (
+                    factory_id,
+                    identity_source,
+                    tested_at_utc,
+                    board,
+                    receiver,
+                    sw_version,
+                    hw_version,
+                    result,
+                    profile,
+                    payload_json,
+                    inspection_id,
+                ),
+            )
+            created = False
+        else:
+            module_code = factory_id
+            con.execute(
+                """
+                INSERT INTO inspections (
+                    module_code, factory_id, identity_source, tested_at_utc,
+                    board, receiver, sw_version, hw_version, result, profile,
+                    rinv_before, rinv_after, payload_json, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    module_code,
+                    factory_id,
+                    identity_source,
+                    tested_at_utc,
+                    board,
+                    receiver,
+                    sw_version,
+                    hw_version,
+                    result,
+                    profile,
+                    None,
+                    None,
+                    payload_json,
+                    created_at,
+                ),
+            )
+            inspection_id = int(
+                con.execute("SELECT last_insert_rowid()").fetchone()[0]
+            )
+            created = True
+
+    return {
+        "id": inspection_id,
+        "module_code": module_code,
+        "factory_id": factory_id,
+        "tested_at_utc": tested_at_utc,
+        "database": str(db_path),
+        "created": created,
+    }
+
+
 def update_rinv(module_code: str, rinv_after: str, db_path: Path = DEFAULT_DB) -> None:
     db_path = ensure_db(db_path)
     with sqlite3.connect(db_path) as con:
@@ -190,8 +311,9 @@ def list_inspections(limit: int = 100, db_path: Path = DEFAULT_DB) -> list[dict[
         con.row_factory = sqlite3.Row
         rows = con.execute(
             """
-            SELECT id, module_code, tested_at_utc, board, receiver, sw_version,
-                   hw_version, result, profile, rinv_before, rinv_after
+            SELECT id, module_code, factory_id, identity_source, tested_at_utc,
+                   board, receiver, sw_version, hw_version, result, profile,
+                   rinv_before, rinv_after
             FROM inspections ORDER BY id DESC LIMIT ?
             """,
             (limit,),
