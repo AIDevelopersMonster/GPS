@@ -89,7 +89,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.7")
+        self.title("GPS Lab Diagnostic Console v0.7.1")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -136,6 +136,11 @@ class GPSGui(tk.Tk):
         self.pcas_command_var = tk.StringVar(value="$PCAS06,0*1B")
         self.pcas_show_all_var = tk.BooleanVar(value=False)
         self.pcas_status_var = tk.StringVar(value="Ready")
+        self.pcas_receiver_var = tk.StringVar(value="-")
+        self.pcas_hardware_var = tk.StringVar(value="-")
+        self.pcas_firmware_var = tk.StringVar(value="-")
+        self.pcas_receiver_id_var = tk.StringVar(value="-")
+        self.pcas_antenna_var = tk.StringVar(value="-")
         self.pcas_rx_buffer = ""
 
         self.db_path_var = tk.StringVar(value=str(DEFAULT_DB))
@@ -711,6 +716,34 @@ class GPSGui(tk.Tk):
             ubx_terminal, wrap="none", font=("Consolas", 9), state="disabled"
         )
         self.ubx_text.pack(fill="both", expand=True)
+
+        pcas_identity = ttk.LabelFrame(
+            pcas_terminal, text="Detected PCAS receiver", padding=10
+        )
+        pcas_identity.pack(fill="x", pady=(0, 8))
+
+        pcas_identity_fields = (
+            ("Receiver", self.pcas_receiver_var),
+            ("Hardware", self.pcas_hardware_var),
+            ("Firmware", self.pcas_firmware_var),
+            ("Receiver ID", self.pcas_receiver_id_var),
+            ("Antenna", self.pcas_antenna_var),
+        )
+        for row, (label, var) in enumerate(pcas_identity_fields):
+            ttk.Label(pcas_identity, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 12), pady=2
+            )
+            ttk.Label(
+                pcas_identity,
+                textvariable=var,
+                font=("TkDefaultFont", 10, "bold"),
+            ).grid(row=row, column=1, sticky="w", pady=2)
+
+        ttk.Button(
+            pcas_identity,
+            text="Identify PCAS",
+            command=self._identify_pcas,
+        ).grid(row=0, column=2, rowspan=2, padx=(24, 0), sticky="nw")
 
         pcas_help = ttk.LabelFrame(pcas_terminal, text="PCAS / URANUS5 ASCII terminal", padding=10)
         pcas_help.pack(fill="x", pady=(0, 8))
@@ -1396,6 +1429,57 @@ class GPSGui(tk.Tk):
         self.pcas_text.see("end")
         self.pcas_text.configure(state="disabled")
 
+    def _identify_pcas(self) -> None:
+        if not self._ensure_connected():
+            return
+        self.pcas_status_var.set("Identifying PCAS receiver...")
+        self._send_pcas_text("$PCAS06,0*1B")
+        self.after(180, lambda: self._send_pcas_text("$PCAS06,1*1A"))
+
+    def _parse_pcas_identity_line(self, line: str) -> None:
+        """Extract URANUS5/PCAS identity and antenna state from GPTXT replies."""
+        body = line.strip()
+        if body.startswith("$"):
+            body = body[1:]
+        if "*" in body:
+            body = body.split("*", 1)[0]
+
+        if "SW=" in body:
+            value = body.split("SW=", 1)[1].strip()
+            parts = [item.strip() for item in value.split(",") if item.strip()]
+            if parts:
+                family = parts[0]
+                version = parts[1] if len(parts) > 1 else ""
+                firmware = f"{family} {version}".strip()
+                self.pcas_firmware_var.set(firmware)
+                hardware = self.pcas_hardware_var.get()
+                if hardware and hardware != "-":
+                    self.pcas_receiver_var.set(f"{hardware} / {family}")
+                else:
+                    self.pcas_receiver_var.set(family)
+                self.pcas_status_var.set("Firmware identified")
+
+        if "HW=" in body:
+            value = body.split("HW=", 1)[1].strip()
+            parts = [item.strip() for item in value.split(",")]
+            hardware = parts[0] if parts else ""
+            receiver_id = parts[1] if len(parts) > 1 and parts[1] else ""
+            if hardware:
+                self.pcas_hardware_var.set(hardware)
+                firmware = self.pcas_firmware_var.get()
+                family = firmware.split(" ", 1)[0] if firmware and firmware != "-" else ""
+                self.pcas_receiver_var.set(
+                    f"{hardware} / {family}".rstrip(" /")
+                )
+            if receiver_id:
+                self.pcas_receiver_id_var.set(receiver_id)
+            self.pcas_status_var.set("Hardware identified")
+
+        if "ANTENNA " in body:
+            antenna = body.split("ANTENNA ", 1)[1].split(",", 1)[0].strip()
+            if antenna:
+                self.pcas_antenna_var.set(antenna)
+
     def _feed_pcas_terminal(self, data: bytes) -> None:
         """Display serial ASCII as complete terminal lines, preserving split CR/LF frames."""
         text = data.decode("ascii", "replace")
@@ -1408,6 +1492,7 @@ class GPSGui(tk.Tk):
         for line in parts:
             if not line:
                 continue
+            self._parse_pcas_identity_line(line)
             if (
                 self.pcas_show_all_var.get()
                 or line.startswith("$PCAS")
