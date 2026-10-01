@@ -62,7 +62,7 @@ def next_module_code(con: sqlite3.Connection, tested_at_utc: str) -> str:
 def build_rinv_text(module_code: str, tested_at_utc: str) -> str:
     dt = datetime.fromisoformat(tested_at_utc.replace("Z", "+00:00"))
     # 30-byte CFG-RINV budget; ASCII and human-readable.
-    text = f"GPSLAB {module_code} {dt:%Y%m%d}"
+    text = f"{module_code} {dt:%Y%m%d} OK"
     if len(text.encode("ascii")) > 30:
         raise ValueError("RINV text exceeds 30 bytes")
     return text
