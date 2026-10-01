@@ -62,7 +62,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.3.1")
+        self.title("GPS Lab Diagnostic Console v0.3.2")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -214,45 +214,101 @@ class GPSGui(tk.Tk):
                 font=("TkDefaultFont", 10, "bold"),
             ).grid(row=row, column=1, sticky="w", pady=3)
 
+        identity_box = ttk.LabelFrame(
+            identity, text="Receiver identification", padding=10
+        )
+        identity_box.pack(fill="x", pady=(0, 10))
+
         identity_fields = [
             ("Receiver", self.receiver_var),
             ("SW version", self.sw_var),
             ("HW version", self.hw_var),
             ("Protocol version", self.protver_var),
-            ("USB serial", self.serial_var),
-            ("Unique ID", self.unique_var),
+            ("USB serial descriptor", self.serial_var),
+            ("Unique chip ID", self.unique_var),
+        ]
+
+        for row, (label, var) in enumerate(identity_fields):
+            ttk.Label(identity_box, text=label + ":").grid(
+                row=row, column=0, sticky="w", padx=(0, 16), pady=3
+            )
+            ttk.Label(
+                identity_box,
+                textvariable=var,
+                font=("TkDefaultFont", 10, "bold"),
+            ).grid(row=row, column=1, sticky="w", pady=3)
+
+        ttk.Label(
+            identity_box,
+            text=(
+                "USB serial descriptor is a USB descriptor string and is not guaranteed "
+                "to be a factory-unique serial number. Unique chip ID is shown only if "
+                "the receiver implements UBX-SEC-UNIQID."
+            ),
+            wraplength=940,
+            justify="left",
+        ).grid(row=len(identity_fields), column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        time_box = ttk.LabelFrame(identity, text="Time", padding=10)
+        time_box.pack(fill="x", pady=(0, 10))
+
+        time_fields = [
             ("GNSS time UTC", self.gnss_time_var),
             ("GNSS date UTC", self.gnss_date_var),
-            ("NMEA UTC raw/combined", self.utc_var),
+            ("NMEA UTC combined", self.utc_var),
             ("System UTC", self.system_utc_var),
-            ("UBX UTC", self.ubx_time_var),
+            ("UBX NAV-TIMEUTC", self.ubx_time_var),
             ("UBX UTC validity", self.ubx_time_valid_var),
             ("Host UTC delta", self.host_utc_delta_var),
             ("Time status", self.time_status_var),
         ]
 
-        for row, (label, var) in enumerate(identity_fields):
-            ttk.Label(identity, text=label + ":").grid(
+        for row, (label, var) in enumerate(time_fields):
+            ttk.Label(time_box, text=label + ":").grid(
                 row=row, column=0, sticky="w", padx=(0, 16), pady=3
             )
             ttk.Label(
-                identity,
+                time_box,
                 textvariable=var,
                 font=("TkDefaultFont", 10, "bold"),
             ).grid(row=row, column=1, sticky="w", pady=3)
 
-        ttk.Button(identity, text="Poll MON-VER", command=lambda: self._send_named(MON_VER_POLL)).grid(
-            row=10, column=0, sticky="w", pady=(12, 2)
-        )
-        ttk.Button(identity, text="Poll CFG-USB", command=lambda: self._send_named(CFG_USB_POLL)).grid(
-            row=10, column=1, sticky="w", padx=(8, 0), pady=(12, 2)
-        )
-        ttk.Button(identity, text="Poll SEC-UNIQID", command=lambda: self._send_named(SEC_UNIQID_POLL)).grid(
-            row=11, column=0, sticky="w", pady=2
-        )
-        ttk.Button(identity, text="Poll NAV-TIMEUTC", command=lambda: self._send_named(NAV_TIMEUTC_POLL)).grid(
-            row=11, column=1, sticky="w", padx=(8, 0), pady=2
-        )
+        polls = ttk.LabelFrame(identity, text="Read-only UBX diagnostic requests", padding=10)
+        polls.pack(fill="x")
+
+        poll_rows = [
+            (
+                "Poll MON-VER",
+                self._poll_mon_ver,
+                "Read receiver software/hardware version and protocol information.",
+            ),
+            (
+                "Poll CFG-USB",
+                self._poll_cfg_usb,
+                "Read USB descriptor configuration, including serial descriptor if present.",
+            ),
+            (
+                "Poll SEC-UNIQID",
+                self._poll_unique_id,
+                "Request unique chip ID. Older receivers such as u-blox 6 may not support it.",
+            ),
+            (
+                "Poll NAV-TIMEUTC",
+                self._poll_timeutc,
+                "Read UBX UTC time and its validity flags independently of NMEA display.",
+            ),
+        ]
+
+        for row, (caption, command, explanation) in enumerate(poll_rows):
+            ttk.Button(polls, text=caption, command=command, width=18).grid(
+                row=row, column=0, sticky="w", pady=3
+            )
+            ttk.Label(
+                polls,
+                text=explanation,
+                wraplength=760,
+                justify="left",
+            ).grid(row=row, column=1, sticky="w", padx=(12, 0), pady=3)
 
         self.nmea_notebook = ttk.Notebook(nmea)
         self.nmea_notebook.pack(fill="both", expand=True)
@@ -417,14 +473,44 @@ class GPSGui(tk.Tk):
             return
         self.worker.send(packet)
 
+    def _mark_identity_no_response(self) -> None:
+        s = self.diag.state
+        if s.usb_serial_number is None and self.serial_var.get() == "polling...":
+            self.serial_var.set("not returned / descriptor unavailable")
+        if s.unique_id is None and self.unique_var.get() == "polling...":
+            self.unique_var.set("not returned / unsupported by this receiver")
+
+    def _poll_mon_ver(self) -> None:
+        self._send_named(MON_VER_POLL)
+
+    def _poll_cfg_usb(self) -> None:
+        if not self._ensure_connected():
+            return
+        self.serial_var.set("polling...")
+        self.worker.send(CFG_USB_POLL)
+        self.after(1500, self._mark_identity_no_response)
+
+    def _poll_unique_id(self) -> None:
+        if not self._ensure_connected():
+            return
+        self.unique_var.set("polling...")
+        self.worker.send(SEC_UNIQID_POLL)
+        self.after(1500, self._mark_identity_no_response)
+
+    def _poll_timeutc(self) -> None:
+        self._send_named(NAV_TIMEUTC_POLL)
+
     def identify_all(self) -> None:
         if not self._ensure_connected():
             return
+        self.serial_var.set("polling...")
+        self.unique_var.set("polling...")
         for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL, NAV_TIMEUTC_POLL):
             self.worker.send(packet)
         self.connection_var.set(
             self.connection_var.get() + " | identity polls sent"
         )
+        self.after(1500, self._mark_identity_no_response)
 
     def send_terminal_packet(self) -> None:
         if not self._ensure_connected():
