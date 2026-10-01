@@ -83,9 +83,20 @@ See:
 - `tools/gps-cli/README.md`
 - `tools/gps-gui/README.md`
 
+## Additional receiver families
+
+A tested NEO-6M-lookalike receiver identified itself as `URANUS5 V5.3.0.0` and accepts the PCAS command family rather than the classic u-blox configuration path.
+
+Documentation:
+
+`modules/casic/URANUS5-PCAS/README.md`
+
+It includes identification clues, PCAS commands, UART baud-rate change (including 115200 -> 9600), non-volatile save, restart modes, constellation commands, protocol references, and explicit non-claims about the exact silicon.
+
 ## Video reports
 
 - Git + GitHub from scratch using the GPS project: https://youtu.be/1EewXEMynV0
+- URANUS5 / PCAS clone investigation and UART speed change: https://youtu.be/LIAIyjDMms8
 
 ## Status
 
