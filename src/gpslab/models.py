@@ -53,6 +53,20 @@ class GPSState:
     unique_id: Optional[str] = None
     unique_id_version: Optional[int] = None
 
+    ubx_utc_itow_ms: Optional[int] = None
+    ubx_utc_time_accuracy_ns: Optional[int] = None
+    ubx_utc_nano_ns: Optional[int] = None
+    ubx_utc_year: Optional[int] = None
+    ubx_utc_month: Optional[int] = None
+    ubx_utc_day: Optional[int] = None
+    ubx_utc_hour: Optional[int] = None
+    ubx_utc_minute: Optional[int] = None
+    ubx_utc_second: Optional[int] = None
+    ubx_utc_valid_flags: Optional[int] = None
+    ubx_utc_valid_tow: Optional[bool] = None
+    ubx_utc_valid_week: Optional[bool] = None
+    ubx_utc_valid: Optional[bool] = None
+
     @property
     def has_data(self) -> bool:
         return self.bytes_received > 0
