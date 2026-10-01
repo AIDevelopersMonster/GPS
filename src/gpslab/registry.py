@@ -265,3 +265,23 @@ def get_inspection(module_code: str, db_path: Path = DEFAULT_DB) -> dict[str, An
     item = dict(row)
     item["payload"] = json.loads(item.pop("payload_json"))
     return item
+
+
+def find_inspection_by_rinv(
+    rinv_text: str,
+    db_path: Path = DEFAULT_DB,
+) -> dict[str, Any] | None:
+    path = Path(db_path).expanduser()
+    if not path.is_file():
+        return None
+    with sqlite3.connect(path) as con:
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT * FROM inspections WHERE rinv_after=? ORDER BY id DESC LIMIT 1",
+            (rinv_text,),
+        ).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    item["payload"] = json.loads(item.pop("payload_json"))
+    return item
