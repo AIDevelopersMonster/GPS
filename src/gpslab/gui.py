@@ -11,6 +11,7 @@ from .nmea import explain_sentence, parse_sentence
 from .serialio import DEFAULT_BAUD_RATES, list_serial_ports, open_serial, probe_port
 from .timecheck import utc_delta_seconds
 from .ubx import (
+    CFG_RINV_POLL,
     CFG_USB_POLL,
     MON_HW_POLL,
     MON_IO_POLL,
@@ -66,7 +67,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.4")
+        self.title("GPS Lab Diagnostic Console v0.4.1")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -87,6 +88,9 @@ class GPSGui(tk.Tk):
         self.protver_var = tk.StringVar(value="-")
         self.serial_var = tk.StringVar(value="-")
         self.unique_var = tk.StringVar(value="-")
+        self.rinv_status_var = tk.StringVar(value="NOT READ")
+        self.rinv_text_var = tk.StringVar(value="-")
+        self.rinv_hex_var = tk.StringVar(value="-")
         self.fix_var = tk.StringVar(value="NO FIX")
         self.sats_used_var = tk.StringVar(value="-")
         self.sats_visible_var = tk.StringVar(value="-")
@@ -232,6 +236,9 @@ class GPSGui(tk.Tk):
             ("Protocol version", self.protver_var),
             ("USB serial descriptor", self.serial_var),
             ("Unique chip ID", self.unique_var),
+            ("Remote Inventory status", self.rinv_status_var),
+            ("Remote Inventory text", self.rinv_text_var),
+            ("Remote Inventory hex", self.rinv_hex_var),
         ]
 
         for row, (label, var) in enumerate(identity_fields):
@@ -302,6 +309,11 @@ class GPSGui(tk.Tk):
                 "Poll NAV-TIMEUTC",
                 self._poll_timeutc,
                 "Read UBX UTC time and its validity flags independently of NMEA display.",
+            ),
+            (
+                "Read CFG-RINV",
+                self._poll_rinv,
+                "Read the receiver Remote Inventory field without writing anything.",
             ),
         ]
 
@@ -621,12 +633,20 @@ class GPSGui(tk.Tk):
     def _poll_timeutc(self) -> None:
         self._send_named(NAV_TIMEUTC_POLL)
 
+    def _poll_rinv(self) -> None:
+        if not self._ensure_connected():
+            return
+        self.rinv_status_var.set("READING...")
+        self.rinv_text_var.set("-")
+        self.rinv_hex_var.set("-")
+        self.worker.send(CFG_RINV_POLL)
+
     def identify_all(self) -> None:
         if not self._ensure_connected():
             return
         self.serial_var.set("polling...")
         self.unique_var.set("polling...")
-        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL, NAV_TIMEUTC_POLL):
+        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL, NAV_TIMEUTC_POLL, CFG_RINV_POLL):
             self.worker.send(packet)
         self.connection_var.set(
             self.connection_var.get() + " | identity polls sent"
@@ -934,6 +954,20 @@ class GPSGui(tk.Tk):
         self.protver_var.set(value(s.protocol_version))
         self.serial_var.set(value(s.usb_serial_number))
         self.unique_var.set(value(s.unique_id))
+        if s.rinv_flags is None:
+            if self.rinv_status_var.get() != "READING...":
+                self.rinv_status_var.set("NOT READ")
+            self.rinv_text_var.set("-")
+            self.rinv_hex_var.set("-")
+        else:
+            if s.rinv_is_default_empty is True:
+                self.rinv_status_var.set("EMPTY / FACTORY DEFAULT")
+            elif s.rinv_data:
+                self.rinv_status_var.set("DATA PRESENT")
+            else:
+                self.rinv_status_var.set("READ / NO DATA")
+            self.rinv_text_var.set(s.rinv_text or "-")
+            self.rinv_hex_var.set(s.rinv_hex or "-")
         self.fix_var.set(s.fix)
         self.sats_used_var.set(value(s.satellites_used))
         self.sats_visible_var.set(value(s.satellites_visible))
