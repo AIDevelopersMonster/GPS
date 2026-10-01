@@ -89,7 +89,7 @@ class SerialWorker(threading.Thread):
 class GPSGui(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GPS Lab Diagnostic Console v0.6")
+        self.title("GPS Lab Diagnostic Console v0.7")
         self.geometry("1080x760")
         self.minsize(900, 640)
 
@@ -133,6 +133,9 @@ class GPSGui(tk.Tk):
         self.rate_var = tk.StringVar(value="-")
         self.bytes_var = tk.StringVar(value="0")
         self.ubx_hex_var = tk.StringVar()
+        self.pcas_command_var = tk.StringVar(value="$PCAS06,0*1B")
+        self.pcas_show_all_var = tk.BooleanVar(value=False)
+        self.pcas_status_var = tk.StringVar(value="Ready")
 
         self.db_path_var = tk.StringVar(value=str(DEFAULT_DB))
         self.db_status_var = tk.StringVar(value="NOT CHECKED")
@@ -218,6 +221,7 @@ class GPSGui(tk.Tk):
         engineering = ttk.Frame(notebook, padding=8)
         registry = ttk.Frame(notebook, padding=8)
         ubx_terminal = ttk.Frame(notebook, padding=8)
+        pcas_terminal = ttk.Frame(notebook, padding=8)
         nmea = ttk.Frame(notebook, padding=6)
         raw = ttk.Frame(notebook, padding=6)
 
@@ -227,6 +231,7 @@ class GPSGui(tk.Tk):
         notebook.add(engineering, text="Engineering")
         notebook.add(registry, text="Registry / Provisioning")
         notebook.add(ubx_terminal, text="UBX Terminal")
+        notebook.add(pcas_terminal, text="PCAS Terminal")
         notebook.add(raw, text="Raw Stream")
 
         fields = [
@@ -705,6 +710,75 @@ class GPSGui(tk.Tk):
             ubx_terminal, wrap="none", font=("Consolas", 9), state="disabled"
         )
         self.ubx_text.pack(fill="both", expand=True)
+
+        pcas_help = ttk.LabelFrame(pcas_terminal, text="PCAS / URANUS5 ASCII terminal", padding=10)
+        pcas_help.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            pcas_help,
+            text=(
+                "Commands are sent as ASCII with CR+LF. Enter either a complete command "
+                "such as $PCAS06,0*1B or a payload such as PCAS06,0; the checksum is added automatically."
+            ),
+            wraplength=950,
+            justify="left",
+        ).pack(anchor="w")
+
+        pcas_controls = ttk.Frame(pcas_terminal)
+        pcas_controls.pack(fill="x", pady=(0, 8))
+        ttk.Label(pcas_controls, text="Command").pack(side="left")
+        pcas_entry = ttk.Entry(
+            pcas_controls,
+            textvariable=self.pcas_command_var,
+            width=52,
+            font=("Consolas", 10),
+        )
+        pcas_entry.pack(side="left", padx=8, fill="x", expand=True)
+        pcas_entry.bind("<Return>", lambda _event: self.send_pcas_command())
+        ttk.Button(pcas_controls, text="Send", command=self.send_pcas_command).pack(side="left")
+        ttk.Button(pcas_controls, text="Clear", command=self._clear_pcas_terminal).pack(side="left", padx=(6, 0))
+
+        quick = ttk.LabelFrame(pcas_terminal, text="Quick commands", padding=8)
+        quick.pack(fill="x", pady=(0, 8))
+        quick_specs = (
+            ("Firmware", "$PCAS06,0*1B", None),
+            ("Hardware", "$PCAS06,1*1A", None),
+            ("Save config", "$PCAS00*01", None),
+            ("4800", "$PCAS01,0*1C", 4800),
+            ("9600", "$PCAS01,1*1D", 9600),
+            ("19200", "$PCAS01,2*1E", 19200),
+            ("38400", "$PCAS01,3*1F", 38400),
+            ("57600", "$PCAS01,4*18", 57600),
+            ("115200", "$PCAS01,5*19", 115200),
+        )
+        for col, (caption, command, new_baud) in enumerate(quick_specs):
+            action = (
+                (lambda c=command, b=new_baud: self._send_pcas_baud_change(c, b))
+                if new_baud
+                else (lambda c=command: self._send_pcas_text(c))
+            )
+            ttk.Button(quick, text=caption, command=action).grid(
+                row=col // 5, column=col % 5, padx=3, pady=3, sticky="ew"
+            )
+        for col in range(5):
+            quick.columnconfigure(col, weight=1)
+
+        pcas_options = ttk.Frame(pcas_terminal)
+        pcas_options.pack(fill="x", pady=(0, 6))
+        ttk.Checkbutton(
+            pcas_options,
+            text="Show all ASCII RX (otherwise only PCAS/GPTXT lines)",
+            variable=self.pcas_show_all_var,
+        ).pack(side="left")
+        ttk.Label(
+            pcas_options,
+            textvariable=self.pcas_status_var,
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side="right")
+
+        self.pcas_text = tk.Text(
+            pcas_terminal, wrap="none", font=("Consolas", 9), state="disabled"
+        )
+        self.pcas_text.pack(fill="both", expand=True)
 
         raw_controls = ttk.Frame(raw)
         raw_controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
@@ -1269,6 +1343,89 @@ class GPSGui(tk.Tk):
                 f"alloc_err={tx.get('allocation_error', '-')}"
             )
 
+    @staticmethod
+    def _pcas_checksum(payload: str) -> int:
+        value = 0
+        for ch in payload:
+            value ^= ord(ch)
+        return value
+
+    @classmethod
+    def _normalize_pcas_command(cls, text: str) -> str:
+        command = text.strip()
+        if not command:
+            raise ValueError("Empty PCAS command")
+        if command.startswith("$"):
+            command = command[1:]
+        command = command.replace("\\r", "").replace("\\n", "")
+
+        if "*" in command:
+            payload, supplied = command.rsplit("*", 1)
+            supplied = supplied.strip().upper()
+            if len(supplied) != 2:
+                raise ValueError("PCAS checksum must contain two hex digits")
+            try:
+                supplied_value = int(supplied, 16)
+            except ValueError as exc:
+                raise ValueError("Invalid PCAS checksum") from exc
+            expected = cls._pcas_checksum(payload)
+            if supplied_value != expected:
+                raise ValueError(
+                    f"Checksum mismatch: supplied {supplied}, expected {expected:02X}"
+                )
+            return f"$" + payload + f"*{expected:02X}\\r\\n"
+
+        payload = command
+        checksum = cls._pcas_checksum(payload)
+        return f"$" + payload + f"*{checksum:02X}\\r\\n"
+
+    def _append_pcas(self, direction: str, text: str) -> None:
+        if not hasattr(self, "pcas_text"):
+            return
+        line = f"{direction} {text.rstrip()}\\n"
+        self.pcas_text.configure(state="normal")
+        self.pcas_text.insert("end", line)
+        self.pcas_text.see("end")
+        self.pcas_text.configure(state="disabled")
+
+    def _clear_pcas_terminal(self) -> None:
+        self.pcas_text.configure(state="normal")
+        self.pcas_text.delete("1.0", "end")
+        self.pcas_text.configure(state="disabled")
+
+    def _send_pcas_text(self, text: str) -> None:
+        if not self._ensure_connected():
+            return
+        try:
+            command = self._normalize_pcas_command(text)
+        except ValueError as exc:
+            messagebox.showerror("PCAS Terminal", str(exc))
+            return
+        self.worker.send(command.encode("ascii"))
+        self._append_pcas("TX", command)
+        self.pcas_status_var.set("Sent")
+
+    def send_pcas_command(self) -> None:
+        self._send_pcas_text(self.pcas_command_var.get())
+
+    def _send_pcas_baud_change(self, command: str, new_baud: int) -> None:
+        if not self._ensure_connected():
+            return
+        if not messagebox.askyesno(
+            "PCAS baud change",
+            f"Send {command} and reconnect this program at {new_baud} baud?",
+        ):
+            return
+        self._send_pcas_text(command)
+        self.pcas_status_var.set(f"Changing UART to {new_baud}...")
+        self.after(250, lambda b=new_baud: self._reconnect_after_pcas_baud_change(b))
+
+    def _reconnect_after_pcas_baud_change(self, new_baud: int) -> None:
+        self.disconnect()
+        self.baud_var.set(str(new_baud))
+        self.pcas_status_var.set(f"Reconnecting at {new_baud}...")
+        self.after(700, self.connect)
+
     def send_terminal_packet(self) -> None:
         if not self._ensure_connected():
             return
@@ -1408,6 +1565,15 @@ class GPSGui(tk.Tk):
         if self.diag.state.ubx_frames > before:
             self._append_ubx("RX", data)
         self._append_raw(data)
+        try:
+            ascii_text = data.decode("ascii", "replace")
+            for line in ascii_text.replace("\r", "").split("\n"):
+                if not line:
+                    continue
+                if self.pcas_show_all_var.get() or line.startswith("$PCAS") or line.startswith("$GPTXT"):
+                    self._append_pcas("RX", line)
+        except Exception:
+            pass
         self._refresh_nmea_views()
         self._refresh_engineering()
         self._refresh_status()
