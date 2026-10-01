@@ -28,7 +28,8 @@ def db_status(path: Path = DEFAULT_DB) -> dict[str, Any]:
         return result
 
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as con:
+        uri_path = path.resolve().as_posix()
+        with sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True) as con:
             row = con.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='inspections'"
             ).fetchone()
