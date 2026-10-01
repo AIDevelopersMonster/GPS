@@ -7,6 +7,7 @@ from .models import GPSState
 from .nmea import decode_fields, parse_sentence
 from .ubx import (
     extract_frames,
+    parse_cfg_rinv,
     parse_cfg_usb,
     parse_mon_hw,
     parse_mon_io,
@@ -99,6 +100,17 @@ class GPSDiagnostics:
                     self.state.usb_vendor_string = info.get("vendor_string")
                     self.state.usb_product_string = info.get("product_string")
                     self.state.usb_serial_number = info.get("serial_number")
+
+            elif frame.msg_class == 0x06 and frame.msg_id == 0x34:
+                info = parse_cfg_rinv(frame.payload)
+                if info:
+                    self.state.rinv_flags = info.get("flags")
+                    self.state.rinv_dump = info.get("dump")
+                    self.state.rinv_binary = info.get("binary")
+                    self.state.rinv_data = info.get("data", b"")
+                    self.state.rinv_text = info.get("text")
+                    self.state.rinv_hex = info.get("hex")
+                    self.state.rinv_is_default_empty = info.get("is_default_empty")
 
             elif frame.msg_class == 0x27 and frame.msg_id == 0x03:
                 info = parse_sec_uniqid(frame.payload)
