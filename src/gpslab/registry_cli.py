@@ -4,7 +4,18 @@ import argparse
 import json
 from pathlib import Path
 
-from .registry import DEFAULT_DB, export_json, list_inspections
+from .registry import DEFAULT_DB, db_status, ensure_db, export_json, list_inspections
+
+
+def cmd_status(args) -> int:
+    print(json.dumps(db_status(Path(args.database)), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_create(args) -> int:
+    path = ensure_db(Path(args.database))
+    print(json.dumps(db_status(path), ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_list(args) -> int:
@@ -22,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="gps-registry", description="GPS Lab inspection registry")
     p.add_argument("--database", default=str(DEFAULT_DB))
     sub = p.add_subparsers(dest="command", required=True)
+
+    q = sub.add_parser("status")
+    q.set_defaults(func=cmd_status)
+
+    q = sub.add_parser("create")
+    q.set_defaults(func=cmd_create)
 
     q = sub.add_parser("list")
     q.add_argument("--limit", type=int, default=100)
