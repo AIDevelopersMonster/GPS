@@ -535,8 +535,9 @@ class GPSGui(tk.Tk):
             prov_box,
             text=(
                 "Provision writes a plain human-readable marker only after RINV is confirmed empty "
-                "and the current diagnostic checks pass. It then reads the marker back and saves "
-                "only rinvConf to EEPROM. Final PASS is recorded only after a later power-cycle verification."
+                "and GNSS/NMEA time has been received. SW/HW, fix and Engineering/MON data are optional: "
+                "they are stored if already available, but provisioning never waits for them. "
+                "Final PASS requires the marker to survive a power cycle and time to be received again."
             ),
             wraplength=920,
             justify="left",
@@ -797,7 +798,15 @@ class GPSGui(tk.Tk):
 
     def _current_test_snapshot(self) -> tuple[bool, dict]:
         s = self.diag.state
-        uart_errors = []
+
+        # Fast technological profile: receiving GNSS/NMEA time is the only
+        # mandatory functional observation. Everything else is opportunistic
+        # engineering data and is stored if it happened to arrive.
+        required = {
+            "time_received": bool(s.utc_time),
+        }
+
+        uart_errors = None
         for row in s.mon_io:
             if row.get("name") == "UART1":
                 uart_errors = [
@@ -807,28 +816,29 @@ class GPSGui(tk.Tk):
                 ]
                 break
 
-        checks = {
+        optional = {
             "serial_data": s.bytes_received > 0,
-            "nmea_valid": s.nmea_valid > 0 and s.nmea_invalid == 0,
-            "ubx_bidirectional": s.ubx_frames > 0,
-            "time_received": bool(s.utc_time),
+            "nmea_valid_frames": s.nmea_valid,
+            "nmea_invalid_frames": s.nmea_invalid,
+            "ubx_frames": s.ubx_frames,
+            "sw_version": s.ubx_sw_version,
+            "hw_version": s.ubx_hw_version,
+            "receiver_identity": s.receiver_identity,
+            "fix": s.fix,
+            "satellites_used": s.satellites_used,
             "mon_hw_received": bool(s.mon_hw),
-            "antenna_ok": (s.mon_hw or {}).get("antenna_status") == "OK",
+            "antenna_status": (s.mon_hw or {}).get("antenna_status"),
             "mon_io_received": bool(s.mon_io),
-            "uart_errors_zero": bool(uart_errors) and sum(uart_errors) == 0,
+            "uart_errors": uart_errors,
             "rxbuf_received": bool(s.mon_rxbuf),
             "txbuf_received": bool(s.mon_txbuf),
-            "txbuf_no_errors": bool(s.mon_txbuf) and not any(
-                (
-                    s.mon_txbuf.get("limit_reached"),
-                    s.mon_txbuf.get("memory_allocation_error"),
-                    s.mon_txbuf.get("allocation_error"),
-                )
-            ),
         }
-        passed = all(checks.values())
+
+        passed = all(required.values())
         snapshot = {
-            "checks": checks,
+            "profile_policy": "TIME_REQUIRED_OTHER_DATA_OPTIONAL",
+            "required": required,
+            "optional": optional,
             "state": s.to_dict(),
             "captured_at_utc": utc_now_iso(),
         }
@@ -852,10 +862,9 @@ class GPSGui(tk.Tk):
 
         passed, snapshot = self._current_test_snapshot()
         if not passed:
-            failed = [k for k, v in snapshot["checks"].items() if not v]
             messagebox.showwarning(
                 "GPS Lab Registry",
-                "Mandatory diagnostic checks are not complete: " + ", ".join(failed),
+                "Required quick test is not complete: GNSS/NMEA time has not been received yet.",
             )
             return
 
@@ -936,6 +945,13 @@ class GPSGui(tk.Tk):
         self.after(700, self._finish_persistence_verify)
 
     def _finish_persistence_verify(self) -> None:
+        if not self.diag.state.utc_time:
+            self.registry_state_var.set("WAITING FOR GNSS TIME")
+            self.registry_last_var.set(
+                "RINV verification deferred: wait until GNSS/NMEA time is received, then press Verify after power cycle again."
+            )
+            return
+
         rinv_text = self.diag.state.rinv_text
         if not rinv_text:
             self.registry_state_var.set("VERIFY FAILED")
@@ -950,6 +966,9 @@ class GPSGui(tk.Tk):
         payload = row.get("payload", {})
         payload["power_cycle_verified"] = True
         payload["power_cycle_verified_at_utc"] = utc_now_iso()
+        payload["verification_time_received"] = self.diag.state.utc_time
+        payload["verification_date_received"] = self.diag.state.utc_date
+        payload["verification_optional_state"] = self.diag.state.to_dict()
         update_inspection(
             row["module_code"],
             result="PASS",
