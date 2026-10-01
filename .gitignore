@@ -25,3 +25,45 @@ Thumbs.db
 
 # Captures generated during local tests
 *.tmp
+
+# GPS Lab local operational data
+# The authoritative inspection database lives outside the repo:
+#   %USERPROFILE%\.gpslab\gpslab.sqlite3
+# These patterns prevent accidental copies/exports from being committed.
+/.gpslab/
+/exports/
+/backup/
+/backups/
+/captures/
+/local/
+/private/
+
+# GPS Lab database copies and generated exports
+/gpslab.sqlite3
+/gpslab*.sqlite3
+/gpslab*.db
+/gpslab-export*.json
+/gpslab*.csv
+/gpslab-report*.html
+/GPS6-*.html
+
+# Local serial/GNSS captures
+/gps-capture*.bin
+/*.nmea
+/*.ubx
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python/tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
