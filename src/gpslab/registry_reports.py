@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .registry import DEFAULT_DB, db_status, get_inspection
+from .registry import DEFAULT_DB, db_status, ensure_db, get_inspection
 
 
 def query_inspections(
@@ -23,6 +23,10 @@ def query_inspections(
     path = Path(db_path).expanduser()
     if not path.is_file():
         return []
+
+    # Existing databases are migrated in place before queries that depend on
+    # the current schema. This does not create a new database when none exists.
+    path = ensure_db(path)
 
     where: list[str] = []
     params: list[Any] = []
