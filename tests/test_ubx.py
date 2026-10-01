@@ -4,10 +4,18 @@ from gpslab.ubx import (
     CFG_USB_POLL,
     MON_VER_POLL,
     SEC_UNIQID_POLL,
+    MON_HW_POLL,
+    MON_IO_POLL,
+    MON_RXBUF_POLL,
+    MON_TXBUF_POLL,
     build_packet,
     extract_frames,
     packet_is_valid,
     parse_cfg_usb,
+    parse_mon_hw,
+    parse_mon_io,
+    parse_mon_rxbuf,
+    parse_mon_txbuf,
     parse_mon_ver,
     parse_sec_uniqid,
 )
@@ -23,6 +31,10 @@ class TestUBX(unittest.TestCase):
     def test_identity_polls_are_valid(self):
         self.assertTrue(packet_is_valid(CFG_USB_POLL))
         self.assertTrue(packet_is_valid(SEC_UNIQID_POLL))
+
+    def test_engineering_polls_are_valid(self):
+        for packet in (MON_HW_POLL, MON_IO_POLL, MON_RXBUF_POLL, MON_TXBUF_POLL):
+            self.assertTrue(packet_is_valid(packet))
 
     def test_extract_frame(self):
         packet = build_packet(0x01, 0x02, b"\x10\x20\x30")
@@ -57,6 +69,54 @@ class TestUBX(unittest.TestCase):
         result = parse_sec_uniqid(payload)
         self.assertEqual(result["version"], 1)
         self.assertEqual(result["unique_id"], "1122334455")
+
+    def test_parse_mon_hw(self):
+        payload = bytearray(68)
+        payload[16:18] = (42).to_bytes(2, "little")
+        payload[18:20] = (8192).to_bytes(2, "little")
+        payload[20] = 2
+        payload[21] = 1
+        payload[22] = 0x0D
+        payload[53] = 77
+        result = parse_mon_hw(bytes(payload))
+        self.assertEqual(result["noise_per_ms"], 42)
+        self.assertEqual(result["agc_cnt"], 8192)
+        self.assertEqual(result["antenna_status"], "OK")
+        self.assertEqual(result["jamming_state_name"], "CRITICAL")
+        self.assertEqual(result["jam_ind"], 77)
+
+    def test_parse_mon_io(self):
+        payload = bytearray(20)
+        payload[0:4] = (123).to_bytes(4, "little")
+        payload[4:8] = (456).to_bytes(4, "little")
+        payload[8:10] = (2).to_bytes(2, "little")
+        payload[16] = 1
+        rows = parse_mon_io(bytes(payload))
+        self.assertEqual(rows[0]["rx_bytes"], 123)
+        self.assertEqual(rows[0]["tx_bytes"], 456)
+        self.assertEqual(rows[0]["parity_errs"], 2)
+        self.assertTrue(rows[0]["rx_busy"])
+
+    def test_parse_mon_buffers(self):
+        rx = bytearray(24)
+        rx[0:2] = (12).to_bytes(2, "little")
+        rx[12] = 30
+        rx[18] = 50
+        rx_rows = parse_mon_rxbuf(bytes(rx))
+        self.assertEqual(rx_rows[0]["pending"], 12)
+        self.assertEqual(rx_rows[0]["usage"], 30)
+        self.assertEqual(rx_rows[0]["peak_usage"], 50)
+
+        tx = bytearray(28)
+        tx[0:2] = (7).to_bytes(2, "little")
+        tx[12] = 10
+        tx[18] = 20
+        tx[24] = 15
+        tx[25] = 25
+        tx[26] = 1
+        tx_info = parse_mon_txbuf(bytes(tx))
+        self.assertEqual(tx_info["targets"][0]["pending"], 7)
+        self.assertTrue(tx_info["limit_reached"])
 
 
 if __name__ == "__main__":
