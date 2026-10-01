@@ -12,6 +12,7 @@ from .timecheck import utc_delta_seconds
 from .ubx import (
     CFG_USB_POLL,
     MON_VER_POLL,
+    NAV_TIMEUTC_POLL,
     SEC_UNIQID_POLL,
     frame_name,
     packet_is_valid,
@@ -91,6 +92,8 @@ class GPSGui(tk.Tk):
         self.utc_var = tk.StringVar(value="-")
         self.host_utc_delta_var = tk.StringVar(value="-")
         self.time_status_var = tk.StringVar(value="WAITING")
+        self.ubx_time_var = tk.StringVar(value="-")
+        self.ubx_time_valid_var = tk.StringVar(value="NOT CHECKED")
         self.rate_var = tk.StringVar(value="-")
         self.bytes_var = tk.StringVar(value="0")
         self.ubx_hex_var = tk.StringVar()
@@ -178,7 +181,9 @@ class GPSGui(tk.Tk):
             ("Latitude", self.lat_var),
             ("Longitude", self.lon_var),
             ("Altitude", self.alt_var),
-            ("UTC", self.utc_var),
+            ("NMEA UTC", self.utc_var),
+            ("UBX UTC", self.ubx_time_var),
+            ("UBX UTC validity", self.ubx_time_valid_var),
             ("Host UTC delta", self.host_utc_delta_var),
             ("Time status", self.time_status_var),
             ("GGA rate", self.rate_var),
@@ -202,7 +207,9 @@ class GPSGui(tk.Tk):
             ("Protocol version", self.protver_var),
             ("USB serial", self.serial_var),
             ("Unique ID", self.unique_var),
-            ("UTC", self.utc_var),
+            ("NMEA UTC", self.utc_var),
+            ("UBX UTC", self.ubx_time_var),
+            ("UBX UTC validity", self.ubx_time_valid_var),
             ("Host UTC delta", self.host_utc_delta_var),
             ("Time status", self.time_status_var),
         ]
@@ -225,6 +232,9 @@ class GPSGui(tk.Tk):
         )
         ttk.Button(identity, text="Poll SEC-UNIQID", command=lambda: self._send_named(SEC_UNIQID_POLL)).grid(
             row=11, column=0, sticky="w", pady=2
+        )
+        ttk.Button(identity, text="Poll NAV-TIMEUTC", command=lambda: self._send_named(NAV_TIMEUTC_POLL)).grid(
+            row=11, column=1, sticky="w", padx=(8, 0), pady=2
         )
 
         self.nmea_notebook = ttk.Notebook(nmea)
@@ -393,7 +403,7 @@ class GPSGui(tk.Tk):
     def identify_all(self) -> None:
         if not self._ensure_connected():
             return
-        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL):
+        for packet in (MON_VER_POLL, CFG_USB_POLL, SEC_UNIQID_POLL, NAV_TIMEUTC_POLL):
             self.worker.send(packet)
         self.connection_var.set(
             self.connection_var.get() + " | identity polls sent"
@@ -616,16 +626,42 @@ class GPSGui(tk.Tk):
             " ".join(x for x in (s.utc_date, s.utc_time) if x) or "-"
         )
 
+        if (
+            s.ubx_utc_year is not None
+            and s.ubx_utc_month is not None
+            and s.ubx_utc_day is not None
+            and s.ubx_utc_hour is not None
+            and s.ubx_utc_minute is not None
+            and s.ubx_utc_second is not None
+        ):
+            self.ubx_time_var.set(
+                f"{s.ubx_utc_day:02d}.{s.ubx_utc_month:02d}.{s.ubx_utc_year:04d} "
+                f"{s.ubx_utc_hour:02d}:{s.ubx_utc_minute:02d}:{s.ubx_utc_second:02d} UTC"
+            )
+        else:
+            self.ubx_time_var.set("-")
+
+        if s.ubx_utc_valid is True:
+            self.ubx_time_valid_var.set("VALID UTC")
+        elif s.ubx_utc_valid is False:
+            self.ubx_time_valid_var.set("INVALID / NOT CONFIRMED")
+        else:
+            self.ubx_time_valid_var.set("NOT CHECKED")
+
         delta = utc_delta_seconds(s.utc_date, s.utc_time)
         if delta is None:
             self.host_utc_delta_var.set("-")
             self.time_status_var.set("WAITING")
         else:
             self.host_utc_delta_var.set(f"{delta:+.1f} s")
-            if (s.satellites_visible or 0) > 0 and abs(delta) <= 10.0:
+            if s.ubx_utc_valid is True and abs(delta) <= 10.0:
                 self.time_status_var.set("TIME PASS")
+            elif s.ubx_utc_valid is True:
+                self.time_status_var.set("UTC VALID / HOST MISMATCH")
+            elif s.navigation_status == "V":
+                self.time_status_var.set("NMEA TIME UNCONFIRMED")
             else:
-                self.time_status_var.set("TIME PRESENT")
+                self.time_status_var.set("TIME PRESENT / NOT VERIFIED")
 
         self.rate_var.set(
             "-" if s.gga_rate_hz is None else f"{s.gga_rate_hz:.2f} Hz"
@@ -638,6 +674,8 @@ class GPSGui(tk.Tk):
             status = "DATA / UNKNOWN PROTOCOL"
         elif self.time_status_var.get() == "TIME PASS" and s.fix == "NO FIX":
             status = "RECEIVER ALIVE | TIME VALID | NO FIX"
+        elif self.time_status_var.get() == "NMEA TIME UNCONFIRMED":
+            status = "RECEIVER ALIVE | NMEA TIME UNCONFIRMED | NO FIX"
         elif s.fix == "NO FIX":
             status = "RECEIVER ALIVE | NO FIX"
         else:
