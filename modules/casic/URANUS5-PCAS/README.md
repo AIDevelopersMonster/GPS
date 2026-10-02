@@ -2,6 +2,14 @@
 
 This directory documents a GNSS receiver from an NEO-6M-lookalike module that does not behave like a genuine u-blox 6 receiver at protocol level.
 
+## Project links
+
+- [Repository home](../../../README.md)
+- [GPS Lab documentation home](https://aidevelopersmonster.github.io/GPS/)
+- [NMEA + UBX reference — Russian](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference.html)
+- [NMEA + UBX reference — English](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference-en.html)
+- [Local protocol reference files](../../../docs/protocols/README.md)
+
 ## What was observed
 
 Initial UART output was valid NMEA at 115200 8N1 and GNSS UTC was valid.
