@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GPS Lab — NMEA + UBX Protocol Reference</title>
+<style>
+:root{--bg:#0b1020;--panel:#121a2f;--panel2:#18233d;--text:#e9eef9;--muted:#a9b6cf;--line:#2d3b5f;--accent:#68b5ff;--ok:#74d89b;--warn:#ffd166;--bad:#ff7b7b;--code:#070b14}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+header{position:sticky;top:0;z-index:20;background:rgba(11,16,32,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:12px 20px}
+.header-row{max-width:1500px;margin:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.brand{font-weight:800;font-size:18px;white-space:nowrap}
+.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px}
+#search{flex:1;min-width:240px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 12px;font:inherit}
+.layout{max-width:1500px;margin:auto;display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;padding:20px}
+nav{position:sticky;top:78px;align-self:start;max-height:calc(100vh - 98px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+nav h3{margin:2px 0 10px;font-size:14px;color:var(--muted)}
+nav a{display:block;padding:5px 6px;border-radius:6px;color:var(--text);font-size:14px}
+nav a:hover{background:var(--panel2);text-decoration:none}
+main{min-width:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:0 0 18px}
+section h2{margin-top:0;border-bottom:1px solid var(--line);padding-bottom:8px}
+h1{font-size:30px;margin:.25em 0}
+h2{font-size:22px}
+h3{font-size:17px;margin-top:1.35em}
+p,li{color:var(--text)}
+.muted{color:var(--muted)}
+.callout{border-left:4px solid var(--accent);background:var(--panel2);padding:10px 14px;border-radius:6px;margin:12px 0}
+.callout.warn{border-left-color:var(--warn)}
+.callout.ok{border-left-color:var(--ok)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px}
+.card strong{display:block;margin-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:10px 0 18px;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 9px;vertical-align:top;text-align:left}
+th{background:var(--panel2);position:sticky;top:68px;z-index:2}
+code,kbd{font-family:Consolas,"SFMono-Regular",monospace}
+code{background:var(--code);padding:1px 4px;border-radius:4px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+pre code{padding:0;background:transparent}
+.copy{position:absolute;right:8px;top:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px}
+.hex{font-family:Consolas,monospace;color:#d7e8ff}
+.good{color:var(--ok)} .warn-text{color:var(--warn)} .bad{color:var(--bad)}
+.hidden-by-search{display:none!important}
+.small{font-size:13px}
+footer{max-width:1500px;margin:0 auto 30px;padding:0 20px;color:var(--muted);font-size:13px}
+@media(max-width:920px){.layout{grid-template-columns:1fr}nav{position:relative;top:0;max-height:none}th{position:static}}
+@media print{header,nav,.copy{display:none!important}.layout{display:block;padding:0}body{background:#fff;color:#000}section{break-inside:avoid;border:1px solid #bbb;background:#fff}.card,th{background:#f4f4f4}p,li,td,th,h1,h2,h3{color:#000}code,pre{background:#f7f7f7;color:#000;border-color:#bbb}}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <div class="brand">GPS Lab — NMEA + UBX Reference</div>
+    <span class="badge">NEO-6 / generic NMEA</span>
+    <span class="badge">standalone HTML</span>
+    <a class="badge" href="nmea-ubx-reference.html">RU</a>
+    <input id="search" type="search" placeholder="Search: GGA, MON-VER, checksum, CFG-RINV...">
+  </div>
+</header>
+
+<div class="layout">
+<nav>
+  <h3>Contents</h3>
+  <a href="#scope">1. Purpose</a>
+  <a href="#quick">2. NMEA vs UBX</a>
+  <a href="#uart">3. UART and mixed stream</a>
+  <a href="#nmea-frame">4. NMEA framing</a>
+  <a href="#talkers">5. Talker ID</a>
+  <a href="#coords">6. Coordinates / UTC</a>
+  <a href="#gga">7. GGA</a>
+  <a href="#rmc">8. RMC</a>
+  <a href="#gsa">9. GSA</a>
+  <a href="#gsv">10. GSV</a>
+  <a href="#gll">11. GLL</a>
+  <a href="#vtg">12. VTG</a>
+  <a href="#zda">13. ZDA</a>
+  <a href="#txt">14. TXT</a>
+  <a href="#ubx-frame">15. UBX framing</a>
+  <a href="#ubx-checksum">16. UBX checksum</a>
+  <a href="#ubx-classes">17. UBX classes</a>
+  <a href="#ubx-lab">18. GPS Lab commands</a>
+  <a href="#ack">19. ACK / NAK</a>
+  <a href="#rinv">20. CFG-RINV / NVM</a>
+  <a href="#examples">21. Practical packets</a>
+  <a href="#diagnostics">22. Diagnostics</a>
+  <a href="#sources">23. Sources</a>
+</nav>
+
+<main>
+<section id="scope" data-search>
+<h1>NMEA and UBX Protocol Reference</h1>
+<p>A practical protocol reference for the <strong>GPS Lab</strong> project. It covers the NMEA text protocol and the UBX binary protocol, with emphasis on u-blox 6 / NEO-6M and on the messages actually used by this project.</p>
+<div class="callout warn"><strong>Important:</strong> NMEA is a family of compatible sentence formats, while UBX capabilities depend on the u-blox firmware generation. A message found in a newer protocol manual is not automatically supported by an older NEO-6M receiver.</div>
+<p class="muted small">This reference does not replace the official manufacturer protocol specification. It is intended as an engineering map for reading traces, sending manual polls, and troubleshooting receivers.</p>
+</section>
+
+<section id="quick" data-search>
+<h2>NMEA and UBX — the key difference</h2>
+<div class="grid">
+  <div class="card"><strong>NMEA</strong>ASCII sentences starting with <code>$</code>, normally ending with <code>*HH\r\n</code>. Human-readable.</div>
+  <div class="card"><strong>UBX</strong>Binary u-blox frames using sync bytes <code>B5 62</code>, class/id, payload length, payload, and CK_A/CK_B.</div>
+  <div class="card"><strong>Mixed stream</strong>A u-blox receiver can accept and transmit NMEA and UBX on the same interface; both formats may be interleaved.</div>
+  <div class="card"><strong>Typical use</strong>NMEA is mainly navigation output. UBX adds advanced navigation data, monitoring, configuration, and service functions.</div>
+</div>
+</section>
+
+<section id="uart" data-search>
+<h2>UART and mixed stream</h2>
+<p>For NEO-6M, a typical factory UART1 configuration is <strong>9600 8N1</strong>. NMEA and UBX are normally accepted on the same input without a separate protocol switch. Default output contains standard NMEA sentences; UBX messages may be enabled by configuration or returned in response to poll requests.</p>
+<div class="callout ok">In GPS Lab, the preferred workflow is to discover the baud rate from valid NMEA first, then use read-only UBX polls for identification and engineering diagnostics.</div>
+</section>
+
+<section id="nmea-frame" data-search>
+<h2>NMEA framing</h2>
+<pre><button class="copy">Copy</button><code>$GPGGA,hhmmss.ss,....*CS\r\n</code></pre>
+<table>
+<tr><th>Element</th><th>Description</th></tr>
+<tr><td><code>$</code></td><td>Start of sentence.</td></tr>
+<tr><td><code>GP</code></td><td>Talker ID — navigation source/family.</td></tr>
+<tr><td><code>GGA</code></td><td>Message type.</td></tr>
+<tr><td><code>,...</code></td><td>Comma-separated ASCII fields; empty fields are valid.</td></tr>
+<tr><td><code>*CS</code></td><td>Two hexadecimal digits containing the XOR checksum.</td></tr>
+<tr><td><code>CR LF</code></td><td>Line terminator: bytes <code>0D 0A</code>.</td></tr>
+</table>
+<h3>NMEA checksum</h3>
+<p>XOR all ASCII bytes between <code>$</code> and <code>*</code>, excluding the <code>$</code> and <code>*</code> characters themselves.</p>
+<pre><button class="copy">Copy</button><code>value = 0
+for ch in body:
+    value ^= ord(ch)</code></pre>
+</section>
+
+<section id="talkers" data-search>
+<h2>Talker ID</h2>
+<table>
+<tr><th>Prefix</th><th>Practical meaning</th></tr>
+<tr><td><code>GP</code></td><td>GPS.</td></tr>
+<tr><td><code>GN</code></td><td>Combined GNSS solution.</td></tr>
+<tr><td><code>GL</code></td><td>GLONASS.</td></tr>
+<tr><td><code>GA</code></td><td>Galileo.</td></tr>
+<tr><td><code>GB</code>/<code>BD</code></td><td>BeiDou; naming depends on receiver manufacturer/firmware.</td></tr>
+</table>
+<p>A parser should primarily identify the last three characters of the sentence type — <code>GGA</code>, <code>RMC</code>, <code>GSA</code>, etc. — and keep the talker prefix as a separate value.</p>
+</section>
+
+<section id="coords" data-search>
+<h2>Coordinates, time, and date</h2>
+<h3>Coordinates</h3>
+<p>NMEA normally encodes latitude as <code>ddmm.mmmm</code> and longitude as <code>dddmm.mmmm</code>. Convert with:</p>
+<pre><button class="copy">Copy</button><code>decimal = degrees + minutes / 60
+S or W => negative value</code></pre>
+<p>Example: <code>5540.1234,N</code> → 55° + 40.1234/60.</p>
+<h3>UTC</h3>
+<p>Time is normally encoded as <code>hhmmss.sss</code>. RMC date uses <code>ddmmyy</code>. Do not couple time availability to navigation fix validity: a receiver may provide correct GNSS UTC while position status is still <code>NO FIX</code>.</p>
+</section>
+
+<section id="gga" data-search>
+<h2>GGA — Fix Data</h2>
+<pre><button class="copy">Copy</button><code>$GPGGA,123519.00,5540.12345,N,03736.54321,E,1,08,0.95,156.4,M,14.2,M,,*HH</code></pre>
+<table>
+<tr><th>#</th><th>Field</th><th>Meaning</th></tr>
+<tr><td>1</td><td>UTC</td><td><code>hhmmss.ss</code>.</td></tr>
+<tr><td>2–3</td><td>Latitude + N/S</td><td>Latitude and hemisphere.</td></tr>
+<tr><td>4–5</td><td>Longitude + E/W</td><td>Longitude and hemisphere.</td></tr>
+<tr><td>6</td><td>Fix quality</td><td>0 invalid, 1 GPS/SPS, 2 DGPS; additional values depend on NMEA version and receiver.</td></tr>
+<tr><td>7</td><td>Satellites used</td><td>Number of satellites used in the solution.</td></tr>
+<tr><td>8</td><td>HDOP</td><td>Horizontal geometry; generally lower is better.</td></tr>
+<tr><td>9–10</td><td>Altitude + unit</td><td>MSL altitude, normally meters.</td></tr>
+<tr><td>11–12</td><td>Geoid separation + unit</td><td>Geoid-to-WGS-84 ellipsoid separation.</td></tr>
+<tr><td>13–14</td><td>DGPS age / station</td><td>May be empty.</td></tr>
+</table>
+</section>
+
+<section id="rmc" data-search>
+<h2>RMC — Recommended Minimum</h2>
+<table>
+<tr><th>#</th><th>Field</th><th>Meaning</th></tr>
+<tr><td>1</td><td>UTC</td><td>Time.</td></tr>
+<tr><td>2</td><td>Status</td><td><code>A</code> valid, <code>V</code> void.</td></tr>
+<tr><td>3–6</td><td>Lat/Lon</td><td>Coordinates and hemispheres.</td></tr>
+<tr><td>7</td><td>Speed</td><td>Speed over ground in knots.</td></tr>
+<tr><td>8</td><td>Course</td><td>True course over ground in degrees.</td></tr>
+<tr><td>9</td><td>Date</td><td><code>ddmmyy</code>.</td></tr>
+<tr><td>10–11</td><td>Magnetic variation</td><td>Often empty.</td></tr>
+<tr><td>12</td><td>Mode</td><td>NMEA 2.3+ may include a navigation mode indicator.</td></tr>
+</table>
+<div class="callout">RMC is convenient as a source of the <strong>UTC + date</strong> pair. This is why GPS Lab can display GNSS time independently of whether a position fix exists.</div>
+</section>
+
+<section id="gsa" data-search>
+<h2>GSA — DOP and Active Satellites</h2>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>Selection mode</td><td><code>A</code> automatic, <code>M</code> manual.</td></tr>
+<tr><td>Fix type</td><td>1 = no fix, 2 = 2D, 3 = 3D.</td></tr>
+<tr><td>12 satellite slots</td><td>PRN/SV IDs of satellites actually used in the navigation solution.</td></tr>
+<tr><td>PDOP</td><td>Position dilution of precision.</td></tr>
+<tr><td>HDOP</td><td>Horizontal dilution of precision.</td></tr>
+<tr><td>VDOP</td><td>Vertical dilution of precision.</td></tr>
+</table>
+</section>
+
+<section id="gsv" data-search>
+<h2>GSV — Satellites in View</h2>
+<p>A complete GSV cycle may contain multiple sentences. After the common header, each sentence carries blocks describing up to four satellites.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>Total messages</td><td>Number of sentences in the full GSV cycle.</td></tr>
+<tr><td>Message number</td><td>Current sentence number.</td></tr>
+<tr><td>Satellites in view</td><td>Total visible satellites.</td></tr>
+<tr><td>SV ID</td><td>Satellite identifier.</td></tr>
+<tr><td>Elevation</td><td>Elevation above the horizon, degrees.</td></tr>
+<tr><td>Azimuth</td><td>Azimuth, degrees.</td></tr>
+<tr><td>SNR</td><td>Normally dB-Hz; an empty field means SNR is not available.</td></tr>
+</table>
+</section>
+
+<section id="gll" data-search>
+<h2>GLL — Geographic Position</h2>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>Latitude / N-S</td><td>Latitude.</td></tr>
+<tr><td>Longitude / E-W</td><td>Longitude.</td></tr>
+<tr><td>UTC</td><td>Time.</td></tr>
+<tr><td>Status</td><td><code>A</code> valid / <code>V</code> void.</td></tr>
+<tr><td>Mode</td><td>Optional mode indicator.</td></tr>
+</table>
+</section>
+
+<section id="vtg" data-search>
+<h2>VTG — Track and Ground Speed</h2>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>True track + T</td><td>True course over ground.</td></tr>
+<tr><td>Magnetic track + M</td><td>Magnetic course if available.</td></tr>
+<tr><td>Speed + N</td><td>Speed in knots.</td></tr>
+<tr><td>Speed + K</td><td>Speed in km/h.</td></tr>
+<tr><td>Mode</td><td>May be present in newer NMEA versions.</td></tr>
+</table>
+</section>
+
+<section id="zda" data-search>
+<h2>ZDA — Time & Date</h2>
+<p>ZDA carries UTC time, day, month, year, and local-zone fields. It is convenient for pure time synchronization, but it is not necessarily enabled on every receiver.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>UTC</td><td><code>hhmmss.ss</code>.</td></tr>
+<tr><td>Day</td><td>01–31.</td></tr>
+<tr><td>Month</td><td>01–12.</td></tr>
+<tr><td>Year</td><td>Four digits.</td></tr>
+<tr><td>Local zone hours/minutes</td><td>Local-zone offset; GNSS UTC itself is unaffected.</td></tr>
+</table>
+</section>
+
+<section id="txt" data-search>
+<h2>TXT — Text Transmission</h2>
+<p>Receiver service/status text. Typical structure:</p>
+<pre><button class="copy">Copy</button><code>$GPTXT,total,num,type,text*CS</code></pre>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>Total</td><td>Total number of parts.</td></tr>
+<tr><td>Number</td><td>Current part number.</td></tr>
+<tr><td>Type</td><td>Text-message type code.</td></tr>
+<tr><td>Text</td><td>Manufacturer-defined message text.</td></tr>
+</table>
+<div class="callout">On compatible receivers, TXT may report antenna state or software version. Always interpret the text in the context of the specific receiver manufacturer and firmware.</div>
+</section>
+
+<section id="ubx-frame" data-search>
+<h2>UBX — binary frame structure</h2>
+<pre><button class="copy">Copy</button><code>B5 62 | CLASS | ID | LEN_L LEN_H | PAYLOAD... | CK_A CK_B</code></pre>
+<table>
+<tr><th>Offset</th><th>Size</th><th>Field</th><th>Description</th></tr>
+<tr><td>0</td><td>1</td><td>SYNC1</td><td><code>B5</code></td></tr>
+<tr><td>1</td><td>1</td><td>SYNC2</td><td><code>62</code></td></tr>
+<tr><td>2</td><td>1</td><td>CLASS</td><td>Message class.</td></tr>
+<tr><td>3</td><td>1</td><td>ID</td><td>Message ID within the class.</td></tr>
+<tr><td>4</td><td>2</td><td>LENGTH</td><td>Little-endian payload length.</td></tr>
+<tr><td>6</td><td>N</td><td>PAYLOAD</td><td>May be zero-length for some poll requests.</td></tr>
+<tr><td>6+N</td><td>2</td><td>CK_A/CK_B</td><td>Checksum over CLASS through PAYLOAD.</td></tr>
+</table>
+</section>
+
+<section id="ubx-checksum" data-search>
+<h2>UBX checksum</h2>
+<p>Two 8-bit accumulators. The sync bytes <code>B5 62</code> are not included.</p>
+<pre><button class="copy">Copy</button><code>CK_A = 0
+CK_B = 0
+for byte in CLASS + ID + LENGTH + PAYLOAD:
+    CK_A = (CK_A + byte) & 0xFF
+    CK_B = (CK_B + CK_A) & 0xFF</code></pre>
+</section>
+
+<section id="ubx-classes" data-search>
+<h2>Main UBX classes</h2>
+<table>
+<tr><th>Class</th><th>Name</th><th>Purpose</th></tr>
+<tr><td><code>0x01</code></td><td>NAV</td><td>Navigation solutions, time, and navigation status.</td></tr>
+<tr><td><code>0x02</code></td><td>RXM</td><td>Receiver-manager / measurement data; exact messages depend on generation.</td></tr>
+<tr><td><code>0x04</code></td><td>INF</td><td>Informational text messages.</td></tr>
+<tr><td><code>0x05</code></td><td>ACK</td><td>ACK-ACK and ACK-NAK.</td></tr>
+<tr><td><code>0x06</code></td><td>CFG</td><td>Configuration.</td></tr>
+<tr><td><code>0x0A</code></td><td>MON</td><td>Hardware, I/O, buffer, and version monitoring.</td></tr>
+<tr><td><code>0x0B</code></td><td>AID</td><td>AssistNow / aiding on supported generations.</td></tr>
+<tr><td><code>0x0D</code></td><td>TIM</td><td>Timing messages.</td></tr>
+<tr><td><code>0x27</code></td><td>SEC</td><td>Security/identity functions on newer generations; do not assume availability on u-blox 6.</td></tr>
+</table>
+</section>
+
+<section id="ubx-lab" data-search>
+<h2>UBX messages used by GPS Lab</h2>
+<table>
+<tr><th>Message</th><th>Class/ID</th><th>Purpose</th><th>Notes</th></tr>
+<tr><td>MON-VER</td><td><code>0A 04</code></td><td>SW/HW version and extension strings.</td><td>Read-only poll; a primary identification test for a genuine u-blox receiver.</td></tr>
+<tr><td>CFG-USB</td><td><code>06 1B</code></td><td>USB descriptors.</td><td>A USB serial descriptor is not guaranteed to be a unique chip identifier.</td></tr>
+<tr><td>CFG-RINV</td><td><code>06 34</code></td><td>Remote Inventory.</td><td>On u-blox 6 it can store up to 30 bytes of user inventory data.</td></tr>
+<tr><td>NAV-TIMEUTC</td><td><code>01 21</code></td><td>UTC and validity flags.</td><td>Independent UTC verification through UBX.</td></tr>
+<tr><td>MON-HW</td><td><code>0A 09</code></td><td>RF/HW state, AGC, antenna, and jamming indicators.</td><td>An interference indicator does not identify the interference source.</td></tr>
+<tr><td>MON-IO</td><td><code>0A 02</code></td><td>I/O counters and serial errors.</td><td>Parity/framing/overrun counters are useful for UART diagnostics.</td></tr>
+<tr><td>MON-RXBUF</td><td><code>0A 07</code></td><td>RX buffers.</td><td>Pending, usage, peak.</td></tr>
+<tr><td>MON-TXBUF</td><td><code>0A 08</code></td><td>TX buffers.</td><td>Usage, peak, allocation errors.</td></tr>
+<tr><td>CFG-CFG</td><td><code>06 09</code></td><td>Save/load/clear configuration groups.</td><td>GPS Lab uses it to save RINV to EEPROM.</td></tr>
+<tr><td>SEC-UNIQID</td><td><code>27 03</code></td><td>Unique chip ID on supported generations.</td><td>Not a normal NEO-6M feature; no response is expected on many u-blox 6 units.</td></tr>
+</table>
+</section>
+
+<section id="ack" data-search>
+<h2>ACK-ACK and ACK-NAK</h2>
+<table>
+<tr><th>Message</th><th>Class/ID</th><th>Payload</th></tr>
+<tr><td>ACK-NAK</td><td><code>05 00</code></td><td>Class + ID of the rejected message.</td></tr>
+<tr><td>ACK-ACK</td><td><code>05 01</code></td><td>Class + ID of the accepted message.</td></tr>
+</table>
+<p>A NAK means that a particular command was rejected. It does not automatically prove that the entire UBX protocol is absent. Some compatible or clone receivers recognize UBX framing yet reject unsupported commands with NAK.</p>
+</section>
+
+<section id="rinv" data-search>
+<h2>CFG-RINV and non-volatile storage</h2>
+<p><code>UBX-CFG-RINV</code> provides Remote Inventory storage. GPS Lab used this field for an open technological marker on genuine u-blox 6 receivers.</p>
+<ul>
+<li>payload: flags + up to 30 bytes of inventory data;</li>
+<li>read-back is performed with a subsequent poll;</li>
+<li>for non-volatile persistence, GPS Lab sends <code>CFG-CFG</code> with the RINV configuration-group mask and the selected NVM device;</li>
+<li>available EEPROM/Flash targets and supported deviceMask bits depend on the hardware configuration.</li>
+</ul>
+<div class="callout warn">Do not confuse <strong>RINV</strong> with a cryptographic UID. It is a user inventory field and can potentially be copied.</div>
+</section>
+
+<section id="examples" data-search>
+<h2>Practical UBX poll packets</h2>
+<table>
+<tr><th>Command</th><th>Complete HEX packet</th></tr>
+<tr><td>MON-VER</td><td class="hex">B5 62 0A 04 00 00 0E 34</td></tr>
+<tr><td>CFG-USB</td><td class="hex">B5 62 06 1B 00 00 21 69</td></tr>
+<tr><td>CFG-RINV</td><td class="hex">B5 62 06 34 00 00 3A B4</td></tr>
+<tr><td>NAV-TIMEUTC</td><td class="hex">B5 62 01 21 00 00 22 67</td></tr>
+<tr><td>MON-HW</td><td class="hex">B5 62 0A 09 00 00 13 43</td></tr>
+<tr><td>MON-IO</td><td class="hex">B5 62 0A 02 00 00 0C 2E</td></tr>
+<tr><td>MON-RXBUF</td><td class="hex">B5 62 0A 07 00 00 11 3D</td></tr>
+<tr><td>MON-TXBUF</td><td class="hex">B5 62 0A 08 00 00 12 40</td></tr>
+<tr><td>CFG-RATE poll</td><td class="hex">B5 62 06 08 00 00 0E 30</td></tr>
+<tr><td>CFG-PRT poll</td><td class="hex">B5 62 06 00 00 00 06 18</td></tr>
+<tr><td>SEC-UNIQID poll</td><td class="hex">B5 62 27 03 00 00 2A A5</td></tr>
+</table>
+<div class="callout">A zero-length payload is not a valid poll form for every UBX message. Always verify the poll/set form in the protocol specification for the specific receiver generation.</div>
+</section>
+
+<section id="diagnostics" data-search>
+<h2>Practical diagnostic workflow</h2>
+<ol>
+<li><strong>Are bytes arriving?</strong> If not, check power, common ground, TX/RX wiring, COM port, and baud rate.</li>
+<li><strong>Is there a valid NMEA checksum?</strong> If yes, UART transport and the text protocol are already confirmed.</li>
+<li><strong>Is GNSS UTC available?</strong> Treat it as an independent result; do not hide it because of NO FIX.</li>
+<li><strong>Is there a position fix?</strong> Check GGA quality, RMC status, and GSA fix type.</li>
+<li><strong>How many satellites?</strong> GSV shows satellites in view; GSA/GGA show satellites used.</li>
+<li><strong>Is it a genuine u-blox receiver?</strong> Send MON-VER. A valid protocol response is stronger evidence than a board label.</li>
+<li><strong>Engineering state:</strong> use MON-HW, MON-IO, RXBUF, and TXBUF.</li>
+<li><strong>Must a setting survive power removal?</strong> After saving, always perform a full power-cycle and verify again.</li>
+</ol>
+</section>
+
+<section id="sources" data-search>
+<h2>Sources and scope limits</h2>
+<ul>
+<li><a href="https://content.u-blox.com/sites/default/files/products/documents/u-blox6_ReceiverDescrProtSpec_%28GPS.G6-SW-10018%29_Public.pdf">u-blox 6 Receiver Description Including Protocol Specification</a> — primary UBX/u-blox 6 reference.</li>
+<li><a href="https://content.u-blox.com/sites/default/files/products/documents/NEO-6_DataSheet_%28GPS.G6-HW-09005%29.pdf">u-blox NEO-6 Data Sheet</a> — interfaces and factory settings.</li>
+<li><a href="https://gpsd.gitlab.io/gpsd/NMEA.html">GPSD — NMEA Revealed</a> — open engineering documentation for NMEA.</li>
+<li>Project source code: <code>src/gpslab/nmea.py</code> and <code>src/gpslab/ubx.py</code>.</li>
+</ul>
+<p class="muted small">The official NMEA 0183 standard is distributed separately by the National Marine Electronics Association. This HTML file is not a copy of that standard and covers only the engineering subset needed by this project.</p>
+</section>
+</main>
+</div>
+
+<footer>
+GPS Lab protocol reference • NMEA + UBX • generated for AIDevelopersMonster/GPS
+</footer>
+
+<script>
+document.querySelectorAll('.copy').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const text=btn.parentElement.innerText.replace(/^Copy\s*/,'');
+    try{await navigator.clipboard.writeText(text);btn.textContent='Copied';setTimeout(()=>btn.textContent='Copy',900)}catch(e){}
+  });
+});
+const q=document.getElementById('search');
+q.addEventListener('input',()=>{
+  const s=q.value.trim().toLowerCase();
+  document.querySelectorAll('[data-search]').forEach(el=>{
+    el.classList.toggle('hidden-by-search', !!s && !el.innerText.toLowerCase().includes(s));
+  });
+});
+</script>
+</body>
+</html>

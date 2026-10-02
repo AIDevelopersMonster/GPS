@@ -36,6 +36,55 @@ def build_packet(msg_class: int, msg_id: int, payload: bytes = b"") -> bytes:
 
 
 MON_VER_POLL = build_packet(0x0A, 0x04)
+CFG_USB_POLL = build_packet(0x06, 0x1B)
+CFG_RINV_POLL = build_packet(0x06, 0x34)
+SEC_UNIQID_POLL = build_packet(0x27, 0x03)
+NAV_TIMEUTC_POLL = build_packet(0x01, 0x21)
+MON_HW_POLL = build_packet(0x0A, 0x09)
+MON_IO_POLL = build_packet(0x0A, 0x02)
+MON_RXBUF_POLL = build_packet(0x0A, 0x07)
+MON_TXBUF_POLL = build_packet(0x0A, 0x08)
+
+RINV_CONF_MASK = 0x00000200
+CFG_DEVICE_BBR = 0x01
+CFG_DEVICE_FLASH = 0x02
+CFG_DEVICE_EEPROM = 0x04
+CFG_DEVICE_SPI_FLASH = 0x10
+
+
+def build_cfg_rinv_write(data: bytes, *, binary: bool = True, dump: bool = False) -> bytes:
+    """Build UBX-CFG-RINV write packet for up to 30 bytes of remote inventory data."""
+    if len(data) > 30:
+        raise ValueError("CFG-RINV data must be at most 30 bytes")
+    flags = (0x02 if binary else 0) | (0x01 if dump else 0)
+    payload = bytes([flags]) + data.ljust(30, b"\x00")
+    return build_packet(0x06, 0x34, payload)
+
+
+def build_cfg_cfg_save_rinv(*, device_mask: int = CFG_DEVICE_EEPROM) -> bytes:
+    """Save only the Remote Inventory configuration group to selected NVM device(s)."""
+    clear_mask = 0
+    save_mask = RINV_CONF_MASK
+    load_mask = 0
+    payload = (
+        clear_mask.to_bytes(4, "little")
+        + save_mask.to_bytes(4, "little")
+        + load_mask.to_bytes(4, "little")
+        + bytes([device_mask & 0xFF])
+    )
+    return build_packet(0x06, 0x09, payload)
+
+
+def packet_is_valid(packet: bytes) -> bool:
+    if len(packet) < 8 or packet[:2] != SYNC:
+        return False
+
+    payload_len = packet[4] | (packet[5] << 8)
+    if len(packet) != 8 + payload_len:
+        return False
+
+    expected_a, expected_b = checksum(packet[2:-2])
+    return packet[-2:] == bytes([expected_a, expected_b])
 
 
 def extract_frames(buffer: bytearray) -> list[UBXFrame]:
@@ -102,3 +151,269 @@ def parse_mon_ver(payload: bytes) -> dict:
         "hw_version": hw or None,
         "extensions": extensions,
     }
+
+
+def _cstring(data: bytes) -> str | None:
+    value = data.split(b"\x00", 1)[0].decode("ascii", "replace").strip()
+    return value or None
+
+
+def parse_cfg_rinv(payload: bytes) -> dict:
+    """Parse UBX-CFG-RINV remote inventory contents (u-blox 6)."""
+    if len(payload) < 1:
+        return {}
+
+    flags = payload[0]
+    data = bytes(payload[1:31])
+    binary = bool(flags & 0x02)
+    dump = bool(flags & 0x01)
+    text = None
+    if not binary:
+        text = data.decode("ascii", "replace").rstrip("\x00")
+
+    default_text = "Notice: no data saved!"
+    is_default_empty = (
+        flags == 0
+        and text is not None
+        and text.rstrip("\x00") == default_text
+    )
+
+    return {
+        "flags": flags,
+        "dump": dump,
+        "binary": binary,
+        "data": data,
+        "length": len(data),
+        "text": text,
+        "hex": data.hex(" ").upper(),
+        "is_default_empty": is_default_empty,
+    }
+
+
+def parse_cfg_usb(payload: bytes) -> dict:
+    """Parse the 108-byte UBX-CFG-USB response."""
+    if len(payload) < 108:
+        return {}
+
+    return {
+        "vendor_id": int.from_bytes(payload[0:2], "little"),
+        "product_id": int.from_bytes(payload[2:4], "little"),
+        "power_consumption_ma": int.from_bytes(payload[8:10], "little"),
+        "flags": int.from_bytes(payload[10:12], "little"),
+        "vendor_string": _cstring(payload[12:44]),
+        "product_string": _cstring(payload[44:76]),
+        "serial_number": _cstring(payload[76:108]),
+    }
+
+
+def parse_sec_uniqid(payload: bytes) -> dict:
+    """Parse UBX-SEC-UNIQID on receiver generations that implement it."""
+    if len(payload) < 9:
+        return {}
+
+    unique = payload[4:]
+    return {
+        "version": payload[0],
+        "unique_id": unique.hex().upper() or None,
+    }
+
+
+def parse_nav_timeutc(payload: bytes) -> dict:
+    """Parse UBX-NAV-TIMEUTC UTC solution and validity flags."""
+    if len(payload) < 20:
+        return {}
+
+    valid = payload[19]
+    return {
+        "itow_ms": int.from_bytes(payload[0:4], "little"),
+        "time_accuracy_ns": int.from_bytes(payload[4:8], "little"),
+        "nano_ns": int.from_bytes(payload[8:12], "little", signed=True),
+        "year": int.from_bytes(payload[12:14], "little"),
+        "month": payload[14],
+        "day": payload[15],
+        "hour": payload[16],
+        "minute": payload[17],
+        "second": payload[18],
+        "valid_flags": valid,
+        "valid_tow": bool(valid & 0x01),
+        "valid_week": bool(valid & 0x02),
+        "valid_utc": bool(valid & 0x04),
+    }
+
+
+
+
+PORT_NAMES = {
+    0: "DDC/I2C",
+    1: "UART1",
+    2: "UART2",
+    3: "USB",
+    4: "SPI",
+}
+
+
+def parse_mon_hw(payload: bytes) -> dict:
+    """Parse u-blox MON-HW common fields, including u-blox 6 interference data."""
+    if len(payload) < 24:
+        return {}
+
+    flags = payload[22]
+    antenna_status_code = payload[20]
+    antenna_power_code = payload[21]
+    antenna_status_names = {
+        0: "INIT",
+        1: "DONTKNOW",
+        2: "OK",
+        3: "SHORT",
+        4: "OPEN",
+    }
+    antenna_power_names = {
+        0: "OFF",
+        1: "ON",
+        2: "DONTKNOW",
+    }
+    jamming_state = (flags >> 2) & 0x03
+    jamming_state_names = {
+        0: "UNKNOWN / DISABLED",
+        1: "OK",
+        2: "WARNING",
+        3: "CRITICAL",
+    }
+
+    jam_ind = None
+    if len(payload) >= 68:
+        jam_ind = payload[53]
+    elif len(payload) >= 60:
+        jam_ind = payload[45]
+
+    result = {
+        "payload_length": len(payload),
+        "pin_sel": int.from_bytes(payload[0:4], "little"),
+        "pin_bank": int.from_bytes(payload[4:8], "little"),
+        "pin_dir": int.from_bytes(payload[8:12], "little"),
+        "pin_val": int.from_bytes(payload[12:16], "little"),
+        "noise_per_ms": int.from_bytes(payload[16:18], "little"),
+        "agc_cnt": int.from_bytes(payload[18:20], "little"),
+        "antenna_status_code": antenna_status_code,
+        "antenna_status": antenna_status_names.get(
+            antenna_status_code, f"UNKNOWN({antenna_status_code})"
+        ),
+        "antenna_power_code": antenna_power_code,
+        "antenna_power": antenna_power_names.get(
+            antenna_power_code, f"UNKNOWN({antenna_power_code})"
+        ),
+        "flags": flags,
+        "rtc_calib": bool(flags & 0x01),
+        "safe_boot": bool(flags & 0x02),
+        "jamming_state": jamming_state,
+        "jamming_state_name": jamming_state_names[jamming_state],
+        "used_mask": int.from_bytes(payload[24:28], "little")
+        if len(payload) >= 28
+        else None,
+        "jam_ind": jam_ind,
+    }
+
+    if len(payload) >= 68:
+        result.update(
+            pin_irq=int.from_bytes(payload[56:60], "little"),
+            pull_h=int.from_bytes(payload[60:64], "little"),
+            pull_l=int.from_bytes(payload[64:68], "little"),
+        )
+    elif len(payload) >= 60:
+        result.update(
+            pin_irq=int.from_bytes(payload[48:52], "little"),
+            pull_h=int.from_bytes(payload[52:56], "little"),
+            pull_l=int.from_bytes(payload[56:60], "little"),
+        )
+
+    return result
+
+
+def parse_mon_io(payload: bytes) -> list[dict]:
+    """Parse MON-IO repeated 20-byte port blocks."""
+    if len(payload) < 20 or len(payload) % 20:
+        return []
+
+    ports = []
+    for index in range(len(payload) // 20):
+        offset = index * 20
+        ports.append(
+            {
+                "port": index,
+                "name": PORT_NAMES.get(index, f"PORT{index}"),
+                "rx_bytes": int.from_bytes(payload[offset : offset + 4], "little"),
+                "tx_bytes": int.from_bytes(payload[offset + 4 : offset + 8], "little"),
+                "parity_errs": int.from_bytes(payload[offset + 8 : offset + 10], "little"),
+                "framing_errs": int.from_bytes(payload[offset + 10 : offset + 12], "little"),
+                "overrun_errs": int.from_bytes(payload[offset + 12 : offset + 14], "little"),
+                "break_cond": int.from_bytes(payload[offset + 14 : offset + 16], "little"),
+                "rx_busy": bool(payload[offset + 16]),
+                "tx_busy": bool(payload[offset + 17]),
+            }
+        )
+    return ports
+
+
+def parse_mon_rxbuf(payload: bytes) -> list[dict]:
+    """Parse MON-RXBUF six target buffer entries."""
+    if len(payload) < 24:
+        return []
+
+    rows = []
+    for index in range(6):
+        rows.append(
+            {
+                "target": index,
+                "name": PORT_NAMES.get(index, f"TARGET{index}"),
+                "pending": int.from_bytes(payload[index * 2 : index * 2 + 2], "little"),
+                "usage": payload[12 + index],
+                "peak_usage": payload[18 + index],
+            }
+        )
+    return rows
+
+
+def parse_mon_txbuf(payload: bytes) -> dict:
+    """Parse MON-TXBUF six target entries and aggregate status."""
+    if len(payload) < 28:
+        return {}
+
+    rows = []
+    for index in range(6):
+        rows.append(
+            {
+                "target": index,
+                "name": PORT_NAMES.get(index, f"TARGET{index}"),
+                "pending": int.from_bytes(payload[index * 2 : index * 2 + 2], "little"),
+                "usage": payload[12 + index],
+                "peak_usage": payload[18 + index],
+            }
+        )
+
+    errors = payload[26]
+    return {
+        "targets": rows,
+        "total_usage": payload[24],
+        "total_peak_usage": payload[25],
+        "errors": errors,
+        "limit_reached": bool(errors & 0x01),
+        "memory_allocation_error": bool(errors & 0x02),
+        "allocation_error": bool(errors & 0x04),
+    }
+
+
+def frame_name(msg_class: int, msg_id: int) -> str:
+    names = {
+        (0x0A, 0x04): "MON-VER",
+        (0x06, 0x1B): "CFG-USB",
+        (0x06, 0x34): "CFG-RINV",
+        (0x27, 0x03): "SEC-UNIQID",
+        (0x01, 0x21): "NAV-TIMEUTC",
+        (0x0A, 0x09): "MON-HW",
+        (0x0A, 0x02): "MON-IO",
+        (0x0A, 0x07): "MON-RXBUF",
+        (0x0A, 0x08): "MON-TXBUF",
+        (0x05, 0x00): "ACK-NAK",
+        (0x05, 0x01): "ACK-ACK",
+    }
+    return names.get((msg_class, msg_id), f"{msg_class:02X}/{msg_id:02X}")

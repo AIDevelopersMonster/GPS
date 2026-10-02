@@ -17,10 +17,12 @@ class GPSState:
     protocol: str = "NONE"
     last_sentence: Optional[str] = None
     sentence_counts: dict[str, int] = field(default_factory=dict)
+    latest_nmea_raw: dict[str, str] = field(default_factory=dict)
 
     fix: str = "NO FIX"
     fix_quality: int = 0
     fix_type: int = 1
+    navigation_status: Optional[str] = None
 
     satellites_used: Optional[int] = None
     satellites_visible: Optional[int] = None
@@ -40,6 +42,44 @@ class GPSState:
     ubx_hw_version: Optional[str] = None
     ubx_extensions: list[str] = field(default_factory=list)
 
+    usb_vendor_id: Optional[int] = None
+    usb_product_id: Optional[int] = None
+    usb_power_consumption_ma: Optional[int] = None
+    usb_flags: Optional[int] = None
+    usb_vendor_string: Optional[str] = None
+    usb_product_string: Optional[str] = None
+    usb_serial_number: Optional[str] = None
+
+    unique_id: Optional[str] = None
+    unique_id_version: Optional[int] = None
+
+    rinv_flags: Optional[int] = None
+    rinv_dump: Optional[bool] = None
+    rinv_binary: Optional[bool] = None
+    rinv_data: bytes = b""
+    rinv_text: Optional[str] = None
+    rinv_hex: Optional[str] = None
+    rinv_is_default_empty: Optional[bool] = None
+
+    ubx_utc_itow_ms: Optional[int] = None
+    ubx_utc_time_accuracy_ns: Optional[int] = None
+    ubx_utc_nano_ns: Optional[int] = None
+    ubx_utc_year: Optional[int] = None
+    ubx_utc_month: Optional[int] = None
+    ubx_utc_day: Optional[int] = None
+    ubx_utc_hour: Optional[int] = None
+    ubx_utc_minute: Optional[int] = None
+    ubx_utc_second: Optional[int] = None
+    ubx_utc_valid_flags: Optional[int] = None
+    ubx_utc_valid_tow: Optional[bool] = None
+    ubx_utc_valid_week: Optional[bool] = None
+    ubx_utc_valid: Optional[bool] = None
+
+    mon_hw: dict = field(default_factory=dict)
+    mon_io: list[dict] = field(default_factory=list)
+    mon_rxbuf: list[dict] = field(default_factory=list)
+    mon_txbuf: dict = field(default_factory=dict)
+
     @property
     def has_data(self) -> bool:
         return self.bytes_received > 0
@@ -49,10 +89,19 @@ class GPSState:
         return self.nmea_valid > 0 or self.ubx_frames > 0
 
     @property
+    def protocol_version(self) -> Optional[str]:
+        for item in self.ubx_extensions:
+            if item.startswith("PROTVER="):
+                return item.split("=", 1)[1].strip() or None
+        return None
+
+    @property
     def receiver_identity(self) -> Optional[str]:
         for item in self.ubx_extensions:
             if item.startswith("MOD="):
                 return item[4:].strip() or None
+        if self.usb_product_string:
+            return self.usb_product_string
         if self.ubx_sw_version or self.ubx_hw_version:
             return "u-blox compatible receiver"
         return None
@@ -84,4 +133,5 @@ class GPSState:
     def to_dict(self) -> dict:
         result = asdict(self)
         result["receiver_identity"] = self.receiver_identity
+        result["protocol_version"] = self.protocol_version
         return result
