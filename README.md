@@ -2,6 +2,7 @@
 
 ## Quick access
 
+- [Run GPS-GUI on Windows](run-gps-gui.cmd)
 - [GPS-GUI documentation](tools/gps-gui/README.md)
 - [GPS-CLI documentation](tools/gps-cli/README.md)
 - [GPS-GUI source](src/gpslab/gui.py)
@@ -85,6 +86,14 @@ Launch the graphical console:
 ```powershell
 gps-gui
 ```
+
+On Windows you can also use the repository launcher:
+
+```text
+run-gps-gui.cmd
+```
+
+After cloning/pulling the repository, double-click `run-gps-gui.cmd` in Explorer or run it from PowerShell.
 
 Both interfaces use the same NMEA/UBX parsers and diagnostic state model.
 
