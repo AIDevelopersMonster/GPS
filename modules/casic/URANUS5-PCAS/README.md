@@ -10,6 +10,19 @@ This directory documents a GNSS receiver from an NEO-6M-lookalike module that do
 - [NMEA + UBX reference — English](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference-en.html)
 - [Local protocol reference files](../../../docs/protocols/README.md)
 
+## Known sample variants
+
+Two ATGM332D / URANUS5 V5.2.1.0 samples have now been documented:
+
+- [sample with programmed serial and valid GNSS UTC](samples/atgm332d-v5.2.1.0.md);
+- [sample with zero serial and no usable GNSS reception](samples/atgm332d-v5.2.1.0-zero-serial-no-gnss.md).
+
+The second sample remained digitally responsive, accepted PCAS commands, and
+reported its firmware/hardware identity, but produced no GNSS UTC, used zero
+satellites, and repeatedly reported `ANTENNA OPEN`. The exact hardware fault was
+not investigated further. This is kept as a practical warning that protocol
+responsiveness does not prove that the RF/navigation path is functional.
+
 ## What was observed
 
 Initial UART output was valid NMEA at 115200 8N1 and GNSS UTC was valid.
