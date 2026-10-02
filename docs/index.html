@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GPS Lab Documentation</title>
+<style>
+:root{--bg:#0b1020;--panel:#121a2f;--panel2:#18233d;--text:#e9eef9;--muted:#a9b6cf;--line:#2d3b5f;--accent:#68b5ff;--ok:#74d89b}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;line-height:1.55}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+main{max-width:1050px;margin:auto;padding:48px 22px}
+h1{font-size:38px;margin:0 0 8px}.lead{color:var(--muted);font-size:18px;margin:0 0 28px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.card{display:block;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;color:var(--text)}
+.card:hover{background:var(--panel2);text-decoration:none}.card h2{margin:0 0 8px;font-size:22px}.card p{color:var(--muted);margin:0}
+.links{margin-top:30px;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.links a{display:inline-block;margin:5px 14px 5px 0}
+.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--muted);font-size:12px;margin-right:6px}
+footer{margin-top:34px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<span class="badge">GPS Lab</span><span class="badge">NMEA</span><span class="badge">UBX</span><span class="badge">PCAS / URANUS5</span>
+<h1>GPS / GNSS Laboratory</h1>
+<p class="lead">Documentation and protocol references for AIDevelopersMonster/GPS. This page works both on GitHub Pages and as a local file.</p>
+
+<div class="grid">
+<a class="card" href="protocols/nmea-ubx-reference.html">
+  <h2>NMEA + UBX — Русский</h2>
+  <p>Интерактивный справочник: NMEA, UBX, HEX-пакеты, диагностика, checksum, CFG-RINV.</p>
+</a>
+<a class="card" href="protocols/nmea-ubx-reference-en.html">
+  <h2>NMEA + UBX — English</h2>
+  <p>Interactive protocol reference with NMEA, UBX, packet examples, diagnostics and checksums.</p>
+</a>
+<a class="card" href="../modules/casic/URANUS5-PCAS/README.md">
+  <h2>URANUS5 / PCAS</h2>
+  <p>Receiver identification, PCAS commands, UART baud changes, configuration persistence, and sample records.</p>
+</a>
+<a class="card" href="../tools/gps-gui/README.md">
+  <h2>GPS-GUI</h2>
+  <p>Desktop diagnostic console documentation and operating notes.</p>
+</a>
+</div>
+
+<div class="links">
+<strong>Source code:</strong><br>
+<a href="../src/gpslab/gui.py">GPS-GUI source</a>
+<a href="../src/gpslab/cli.py">GPS-CLI source</a>
+<a href="../src/gpslab/nmea.py">NMEA parser</a>
+<a href="../src/gpslab/ubx.py">UBX parser</a>
+<a href="../src/gpslab/registry.py">Inspection registry</a>
+</div>
+
+<footer>
+Local use: open <code>docs/index.html</code> directly in a browser. Hosted use: GitHub Pages publishes the same <code>docs/</code> tree.
+</footer>
+</main>
+</body>
+</html>
