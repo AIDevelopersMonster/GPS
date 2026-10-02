@@ -83,6 +83,15 @@ See:
 - `tools/gps-cli/README.md`
 - `tools/gps-gui/README.md`
 
+## Protocol reference
+
+Standalone searchable HTML reference for NMEA and UBX:
+
+`docs/protocols/nmea-ubx-reference.html`
+
+Covers NMEA framing/checksum, GGA/RMC/GSA/GSV/GLL/VTG/ZDA/TXT, UBX framing/checksum,
+message classes, GPS Lab UBX polls, ACK/NAK, CFG-RINV/NVM and diagnostic workflow.
+
 ## Additional receiver families
 
 A tested NEO-6M-lookalike receiver identified itself as `URANUS5 V5.3.0.0` and accepts the PCAS command family rather than the classic u-blox configuration path.
