@@ -85,11 +85,12 @@ See:
 
 ## Protocol reference
 
-Standalone searchable HTML reference for NMEA and UBX:
+Standalone searchable HTML references for NMEA and UBX:
 
-`docs/protocols/nmea-ubx-reference.html`
+- Russian: `docs/protocols/nmea-ubx-reference.html`
+- English: `docs/protocols/nmea-ubx-reference-en.html`
 
-Covers NMEA framing/checksum, GGA/RMC/GSA/GSV/GLL/VTG/ZDA/TXT, UBX framing/checksum,
+They cover NMEA framing/checksum, GGA/RMC/GSA/GSV/GLL/VTG/ZDA/TXT, UBX framing/checksum,
 message classes, GPS Lab UBX polls, ACK/NAK, CFG-RINV/NVM and diagnostic workflow.
 
 ## Additional receiver families
