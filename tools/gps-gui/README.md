@@ -4,6 +4,14 @@ Graphical interface for the shared `gpslab` diagnostic core.
 
 The GUI uses Python's standard Tk interface and `pyserial`.
 
+## Project links
+
+- [Repository home](../../README.md)
+- [GPS Lab documentation home](https://aidevelopersmonster.github.io/GPS/)
+- [NMEA + UBX reference — Russian](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference.html)
+- [NMEA + UBX reference — English](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference-en.html)
+- [Local protocol reference files](../../docs/protocols/README.md)
+
 ## Install
 
 From the repository root:
