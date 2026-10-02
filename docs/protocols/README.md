@@ -23,4 +23,4 @@ Start-Process .\docs\protocols\nmea-ubx-reference.html
 Start-Process .\docs\protocols\nmea-ubx-reference-en.html
 ```
 
-The Pages deployment publishes the existing `docs/` files; it does not replace or transform the local copies.
+GitHub Pages can publish the existing `docs/` folder directly from the `main` branch. The same files remain available locally and can be opened without GitHub Pages.
