@@ -1,5 +1,18 @@
 # GPS
 
+## Quick access
+
+- [GPS-GUI documentation](tools/gps-gui/README.md)
+- [GPS-CLI documentation](tools/gps-cli/README.md)
+- [GPS-GUI source](src/gpslab/gui.py)
+- [GPS-CLI source](src/gpslab/cli.py)
+- [Inspection registry](src/gpslab/registry.py)
+- [NMEA + UBX reference — Russian](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference.html)
+- [NMEA + UBX reference — English](https://aidevelopersmonster.github.io/GPS/protocols/nmea-ubx-reference-en.html)
+- [Local protocol files](docs/protocols/README.md)
+- [URANUS5 / PCAS documentation](modules/casic/URANUS5-PCAS/README.md)
+- [GPS Lab documentation home](https://aidevelopersmonster.github.io/GPS/)
+
 Open hardware/software laboratory for GPS and GNSS modules.
 
 The project collects:
